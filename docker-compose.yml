@@ -11,5 +11,5 @@ services:
       - ./data:/data
       # Docker socket — allows deploy scripts to run docker/docker compose commands
       - /var/run/docker.sock:/var/run/docker.sock
-      - /media/docker/waypoint:/media/docker/waypoint
+      - /media/docker:/media/docker
 
