@@ -293,6 +293,13 @@ function toast(msg, err=false) {
 // ── State ──────────────────────────────────────────────────────────────────
 const streams = {}; // project_id -> EventSource
 
+window.addEventListener('beforeunload', e => {
+  if (Object.keys(streams).length > 0) {
+    e.preventDefault();
+    e.returnValue = 'A deploy is in progress. Are you sure you want to leave?';
+  }
+});
+
 // ── API ────────────────────────────────────────────────────────────────────
 async function api(method, path) {
   const r = await fetch(path, { method });
@@ -440,7 +447,11 @@ function waitForRestart(logTitle) {
       if (r.ok) {
         clearInterval(interval);
         logTitle.textContent = '✓ Back online — reloading in 2s…';
-        setTimeout(() => location.reload(), 2000);
+        setTimeout(() => {
+          // Clear streams so the beforeunload warning doesn't block the auto-reload
+          Object.keys(streams).forEach(k => { streams[k].close(); delete streams[k]; });
+          location.reload();
+        }, 2000);
       }
     } catch (_) { /* still down, keep polling */ }
   }, 5000);
