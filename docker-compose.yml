@@ -11,13 +11,5 @@ services:
       - ./data:/data
       # Docker socket — allows deploy scripts to run docker/docker compose commands
       - /var/run/docker.sock:/var/run/docker.sock
-      #
-      # ── Project volumes ───────────────────────────────────────────────────
-      # Mount each project folder so the container can run its deploy script.
-      # Use the same absolute path inside the container as on the host so that
-      # the paths in your .env work without any translation.
-      #
-      # Example (uncomment and adjust for each project in your .env):
-      #   - /home/user/money-tracker:/home/user/money-tracker
-      #   - /home/user/other-app:/home/user/other-app
+      - /media/docker/waypoint:/media/docker/waypoint
 
