@@ -117,6 +117,20 @@ def get_git_info(path: str) -> dict:
 # ── Routes ─────────────────────────────────────────────────────────────────
 
 
+DASHBOARD_NAME = "deployment helper"
+
+
+def _any_other_deploy_active(project_id: str) -> bool:
+    return any(
+        pid != project_id and not s.done
+        for pid, s in _active.items()
+    )
+
+
+def _is_dashboard(project: dict) -> bool:
+    return project["name"].strip().lower() == DASHBOARD_NAME
+
+
 @app.get("/api/projects")
 async def list_projects() -> list[dict]:
     history = _load_history()
@@ -126,12 +140,17 @@ async def list_projects() -> list[dict]:
         proj_history = history.get(p["id"], [])
         last_deploy = proj_history[0] if proj_history else None
         state = _active.get(p["id"])
+        is_deploying = bool(state and not state.done)
+        deploy_blocked = (
+            _is_dashboard(p) and _any_other_deploy_active(p["id"])
+        )
         result.append(
             {
                 **p,
                 "git": git,
                 "last_deploy": last_deploy,
-                "is_deploying": bool(state and not state.done),
+                "is_deploying": is_deploying,
+                "deploy_blocked": deploy_blocked,
             }
         )
     return result
@@ -146,6 +165,9 @@ async def start_deploy(project_id: str) -> dict:
     existing = _active.get(project_id)
     if existing and not existing.done:
         raise HTTPException(409, "Deploy already in progress")
+
+    if _is_dashboard(project) and _any_other_deploy_active(project_id):
+        raise HTTPException(409, "Cannot redeploy dashboard while another deploy is in progress")
 
     state = DeployState(str(uuid.uuid4())[:8])
     _active[project_id] = state
