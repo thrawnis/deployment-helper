@@ -379,7 +379,10 @@ function buildCard(p) {
   meta.append(
     metaRow(IC.branch, branchBadge),
     metaRow(IC.commit, clip(git.last_commit || 'No commits')),
-    metaRow(IC.clock,  last_deploy ? `${fmtDatetime(last_deploy.started_at)} (${ago(last_deploy.started_at)})${fmtDuration(last_deploy.started_at, last_deploy.finished_at) ? ' · ' + fmtDuration(last_deploy.started_at, last_deploy.finished_at) : ''}` : 'Never deployed'),
+    metaRow(IC.clock,  last_deploy ? `${fmtDatetime(last_deploy.started_at)} (${ago(last_deploy.started_at)})` : 'Never deployed'),
+    ...(last_deploy && fmtDuration(last_deploy.started_at, last_deploy.finished_at)
+      ? [metaRow(IC.clock, `Processing time: ${fmtDuration(last_deploy.started_at, last_deploy.finished_at)}`)]
+      : []),
   );
 
   const top = document.createElement('div'); top.className = 'card-top';
