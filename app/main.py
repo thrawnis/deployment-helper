@@ -41,7 +41,12 @@ def _load_projects() -> list[dict]:
     return projects
 
 
-PROJECTS: list[dict] = _load_projects()
+DASHBOARD_NAME = "deployment helper"
+
+PROJECTS: list[dict] = sorted(
+    _load_projects(),
+    key=lambda p: (p["name"].strip().lower() == DASHBOARD_NAME, p["name"].strip().lower()),
+)
 PROJECT_MAP: dict[str, dict] = {p["id"]: p for p in PROJECTS}
 
 # ── App ────────────────────────────────────────────────────────────────────
@@ -115,9 +120,6 @@ def get_git_info(path: str) -> dict:
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────
-
-
-DASHBOARD_NAME = "deployment helper"
 
 
 def _any_other_deploy_active(project_id: str) -> bool:
