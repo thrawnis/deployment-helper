@@ -443,7 +443,7 @@ function waitForRestart(logTitle) {
         setTimeout(() => location.reload(), 2000);
       }
     } catch (_) { /* still down, keep polling */ }
-  }, 10000);
+  }, 5000);
 }
 
 function connectStream(projectId, card, btn, logOut, logTitle, projectName = '') {
