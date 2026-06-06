@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deployment Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #080d18;
+      --surface:     #0f1623;
+      --surface2:    #1a2333;
+      --border:      #1e3352;
+      --teal:        #0d9488;
+      --teal-bright: #14b8a6;
+      --green:       #10b981;
+      --red:         #ef4444;
+      --yellow:      #f59e0b;
+      --text:        #e2e8f0;
+      --muted:       #64748b;
+      --mono:        'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0.875rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header-left { display: flex; align-items: center; gap: 0.625rem; }
+    .header-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--teal);
+      box-shadow: 0 0 8px var(--teal);
+    }
+    header h1 { font-size: 1.0625rem; font-weight: 600; color: var(--teal-bright); letter-spacing: 0.01em; }
+    .refresh-btn {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      padding: 0.3rem 0.65rem; border-radius: 0.375rem; font-size: 0.75rem;
+      cursor: pointer; transition: color 0.15s, border-color 0.15s;
+    }
+    .refresh-btn:hover { color: var(--text); border-color: var(--teal); }
+
+    /* ── Main ───────────────────────────────────────────────────────── */
+    main { padding: 1.5rem; max-width: 1280px; margin: 0 auto; }
+
+    .status-bar {
+      font-size: 0.75rem; color: var(--muted);
+      margin-bottom: 1.25rem;
+    }
+
+    /* ── Grid ───────────────────────────────────────────────────────── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+      gap: 1rem;
+    }
+
+    /* ── Card ───────────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: border-color 0.2s;
+    }
+    .card.deploying { border-color: var(--teal); }
+    .card.deploy-ok  { border-color: rgba(16,185,129,0.5); }
+    .card.deploy-err { border-color: rgba(239,68,68,0.4); }
+
+    .card-top { padding: 1rem 1.125rem 0.875rem; }
+
+    .card-title-row {
+      display: flex; align-items: flex-start;
+      justify-content: space-between; gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    .card-title { font-size: 0.9375rem; font-weight: 600; color: var(--text); }
+
+    /* meta rows */
+    .card-meta { display: flex; flex-direction: column; gap: 0.375rem; }
+    .meta-row {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.8rem; color: var(--muted);
+    }
+    .meta-row svg { flex-shrink: 0; }
+    .meta-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ── Badges ─────────────────────────────────────────────────────── */
+    .badge {
+      display: inline-flex; align-items: center; gap: 0.25rem;
+      padding: 0.15rem 0.55rem; border-radius: 9999px;
+      font-size: 0.7rem; font-weight: 500;
+      font-family: var(--mono); white-space: nowrap; flex-shrink: 0;
+    }
+    .badge-branch  { background: rgba(13,148,136,0.12); color: var(--teal-bright); border: 1px solid rgba(13,148,136,0.3); }
+    .badge-success { background: rgba(16,185,129,0.12); color: var(--green);       border: 1px solid rgba(16,185,129,0.3); }
+    .badge-error   { background: rgba(239,68,68,0.12);  color: var(--red);         border: 1px solid rgba(239,68,68,0.3); }
+    .badge-running {
+      background: rgba(245,158,11,0.12); color: var(--yellow);
+      border: 1px solid rgba(245,158,11,0.3);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.55; } }
+
+    /* ── Card footer ────────────────────────────────────────────────── */
+    .card-footer {
+      padding: 0.75rem 1.125rem;
+      border-top: 1px solid var(--border);
+      display: flex; align-items: center;
+      justify-content: space-between; gap: 0.75rem;
+      margin-top: auto;
+    }
+
+    .deploy-btn {
+      display: inline-flex; align-items: center; gap: 0.375rem;
+      padding: 0.4rem 1rem; border-radius: 0.4rem;
+      font-size: 0.8125rem; font-weight: 500;
+      cursor: pointer; border: none;
+      background: var(--teal); color: #fff;
+      transition: background 0.15s, opacity 0.15s;
+      flex-shrink: 0;
+    }
+    .deploy-btn:hover:not(:disabled) { background: var(--teal-bright); }
+    .deploy-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .deploy-btn.deploying {
+      background: var(--surface2);
+      border: 1px solid rgba(245,158,11,0.5);
+      color: var(--yellow);
+    }
+
+    .history-btn {
+      background: none; border: none; color: var(--muted);
+      font-size: 0.75rem; cursor: pointer;
+      padding: 0.25rem 0; text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .history-btn:hover { color: var(--teal-bright); }
+
+    /* ── Log panel ──────────────────────────────────────────────────── */
+    .log-panel {
+      display: none; flex-direction: column;
+      background: #050912;
+      border-top: 1px solid var(--border);
+    }
+    .log-panel.open { display: flex; }
+
+    .log-toolbar {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      padding: 0.375rem 0.875rem;
+      border-bottom: 1px solid var(--border);
+      gap: 0.5rem;
+    }
+    .log-title {
+      font-size: 0.7rem; color: var(--muted);
+      font-family: var(--mono); flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .log-close {
+      background: none; border: none;
+      color: var(--muted); cursor: pointer;
+      font-size: 0.875rem; padding: 0.2rem 0.3rem;
+      border-radius: 0.25rem; line-height: 1;
+      flex-shrink: 0;
+    }
+    .log-close:hover { color: var(--text); background: var(--surface2); }
+
+    .log-output {
+      padding: 0.625rem 0.875rem;
+      height: 260px; overflow-y: auto;
+      font-family: var(--mono); font-size: 0.775rem;
+      line-height: 1.65; color: #b8c8d8;
+    }
+    .log-output::-webkit-scrollbar { width: 5px; }
+    .log-output::-webkit-scrollbar-track { background: transparent; }
+    .log-output::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .log-line { white-space: pre-wrap; word-break: break-all; }
+    .log-dim   { color: #3d5166; }
+    .log-head  { color: var(--teal-bright); font-weight: bold; margin-top: 0.5rem; }
+
+    /* ── Spinner ─────────────────────────────────────────────────────── */
+    .spin {
+      display: inline-block; width: 12px; height: 12px;
+      border: 2px solid rgba(255,255,255,0.25);
+      border-top-color: currentColor; border-radius: 50%;
+      animation: spin 0.65s linear infinite; flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Empty / loading ─────────────────────────────────────────────── */
+    .page-state {
+      text-align: center; padding: 5rem 1rem;
+      color: var(--muted); font-size: 0.9rem;
+    }
+    .page-state p { margin-bottom: 0.5rem; }
+    .page-state code { font-family: var(--mono); font-size: 0.85rem; color: var(--teal-bright); }
+
+    .toast-container {
+      position: fixed; bottom: 1.25rem; right: 1.25rem;
+      display: flex; flex-direction: column; gap: 0.5rem;
+      z-index: 100;
+    }
+    .toast {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); font-size: 0.8125rem;
+      padding: 0.6rem 1rem; border-radius: 0.5rem;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      animation: slide-in 0.2s ease;
+    }
+    .toast.err { border-color: rgba(239,68,68,0.4); color: var(--red); }
+    @keyframes slide-in { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+
+    @media (max-width: 500px) {
+      main { padding: 1rem; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="header-dot"></div>
+    <h1>Deployment Dashboard</h1>
+  </div>
+  <button class="refresh-btn" onclick="loadProjects()">↻ Refresh</button>
+</header>
+
+<main>
+  <div id="root" class="page-state"><p>Loading…</p></div>
+</main>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+// ── SVG icons ──────────────────────────────────────────────────────────────
+const IC = {
+  branch: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`,
+  commit: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><line x1="3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="21" y2="12"/></svg>`,
+  clock:  `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+  play:   `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>`,
+  folder: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
+};
+
+// ── Utils ──────────────────────────────────────────────────────────────────
+function ago(iso) {
+  if (!iso) return '—';
+  const s = (Date.now() - new Date(iso)) / 1000;
+  if (s < 5)     return 'just now';
+  if (s < 60)    return `${Math.floor(s)}s ago`;
+  if (s < 3600)  return `${Math.floor(s/60)}m ago`;
+  if (s < 86400) return `${Math.floor(s/3600)}h ago`;
+  return new Date(iso).toLocaleDateString();
+}
+function clip(s, n=58) { return s && s.length > n ? s.slice(0,n)+'…' : (s||''); }
+function toast(msg, err=false) {
+  const d = document.createElement('div');
+  d.className = 'toast' + (err?' err':'');
+  d.textContent = msg;
+  document.getElementById('toasts').appendChild(d);
+  setTimeout(()=>d.remove(), 4000);
+}
+
+// ── State ──────────────────────────────────────────────────────────────────
+const streams = {}; // project_id -> EventSource
+
+// ── API ────────────────────────────────────────────────────────────────────
+async function api(method, path) {
+  const r = await fetch(path, { method });
+  if (!r.ok) {
+    const body = await r.json().catch(()=>({}));
+    throw new Error(body.detail || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function badge(cls, text) {
+  const s = document.createElement('span');
+  s.className = `badge badge-${cls}`;
+  s.textContent = text;
+  return s;
+}
+
+function metaRow(iconHtml, content) {
+  const row = document.createElement('div');
+  row.className = 'meta-row';
+  row.innerHTML = iconHtml;
+  if (typeof content === 'string') {
+    const sp = document.createElement('span');
+    sp.className = 'meta-text';
+    sp.textContent = content;
+    row.appendChild(sp);
+  } else {
+    row.appendChild(content);
+  }
+  return row;
+}
+
+function buildCard(p) {
+  const { id, name, git, last_deploy, is_deploying } = p;
+
+  // status badge
+  let statusBadge = null;
+  if (is_deploying) {
+    statusBadge = badge('running', '⟳ deploying');
+  } else if (last_deploy) {
+    statusBadge = last_deploy.success
+      ? badge('success', '✓ success')
+      : badge('error',   '✗ failed');
+  }
+
+  // deploy button
+  const btn = document.createElement('button');
+  btn.className = 'deploy-btn' + (is_deploying ? ' deploying' : '');
+  btn.disabled = is_deploying;
+  btn.innerHTML = is_deploying
+    ? `<span class="spin"></span> Deploying…`
+    : `${IC.play} Deploy`;
+
+  // log panel
+  const logOut   = document.createElement('div');  logOut.className = 'log-output';
+  const logTitle = document.createElement('span'); logTitle.className = 'log-title'; logTitle.textContent = 'Deploy log';
+  const closeBtn = document.createElement('button'); closeBtn.className = 'log-close'; closeBtn.textContent = '✕';
+  const toolbar  = document.createElement('div');  toolbar.className = 'log-toolbar';
+  toolbar.append(logTitle, closeBtn);
+  const logPanel = document.createElement('div');
+  logPanel.className = 'log-panel' + (is_deploying ? ' open' : '');
+  logPanel.append(toolbar, logOut);
+  closeBtn.onclick = () => logPanel.classList.remove('open');
+
+  // history button
+  const histBtn = document.createElement('button');
+  histBtn.className = 'history-btn';
+  histBtn.textContent = 'history';
+  histBtn.onclick = () => showHistory(id, logPanel, logOut, logTitle);
+
+  // assemble card
+  const card = document.createElement('div');
+  card.className = 'card' + (is_deploying ? ' deploying' : '');
+  card.id = `card-${id}`;
+
+  const titleRow = document.createElement('div'); titleRow.className = 'card-title-row';
+  const titleEl  = document.createElement('div'); titleEl.className = 'card-title'; titleEl.textContent = name;
+  titleRow.appendChild(titleEl);
+  if (statusBadge) titleRow.appendChild(statusBadge);
+
+  const meta = document.createElement('div'); meta.className = 'card-meta';
+  const branchBadge = badge('branch', git.branch || 'unknown');
+  meta.append(
+    metaRow(IC.branch, branchBadge),
+    metaRow(IC.commit, clip(git.last_commit || 'No commits')),
+    metaRow(IC.clock,  last_deploy ? `Last deploy ${ago(last_deploy.started_at)}` : 'Never deployed'),
+  );
+
+  const top = document.createElement('div'); top.className = 'card-top';
+  top.append(titleRow, meta);
+
+  const footer = document.createElement('div'); footer.className = 'card-footer';
+  footer.append(histBtn, btn);
+
+  card.append(top, footer, logPanel);
+
+  // deploy action
+  btn.onclick = async () => {
+    try {
+      await api('POST', `/api/projects/${id}/deploy`);
+      logOut.innerHTML = '';
+      logPanel.classList.add('open');
+      logTitle.textContent = 'Connecting…';
+      connectStream(id, card, btn, logOut, logTitle);
+    } catch(err) {
+      toast(err.message, true);
+    }
+  };
+
+  // reconnect if already deploying
+  if (is_deploying) {
+    connectStream(id, card, btn, logOut, logTitle);
+  }
+
+  return card;
+}
+
+function connectStream(projectId, card, btn, logOut, logTitle) {
+  if (streams[projectId]) { streams[projectId].close(); }
+
+  card.className = card.className.replace(/deploy-ok|deploy-err/g,'').trim() + ' deploying';
+  btn.disabled = true;
+  btn.className = 'deploy-btn deploying';
+  btn.innerHTML = `<span class="spin"></span> Deploying…`;
+
+  const es = new EventSource(`/api/projects/${projectId}/stream`);
+  streams[projectId] = es;
+
+  es.onmessage = evt => {
+    const data = JSON.parse(evt.data);
+
+    if (data.type === 'connected') {
+      logTitle.textContent = `Deploy ${data.deploy_id}`;
+    } else if (data.type === 'log') {
+      const line = document.createElement('div');
+      line.className = 'log-line';
+      line.textContent = data.text;
+      logOut.appendChild(line);
+      logOut.scrollTop = logOut.scrollHeight;
+    } else if (data.type === 'end') {
+      es.close(); delete streams[projectId];
+
+      const ok = data.success;
+      logTitle.textContent = ok ? '✓ Deploy succeeded' : '✗ Deploy failed';
+
+      // update card border
+      card.classList.remove('deploying');
+      card.classList.add(ok ? 'deploy-ok' : 'deploy-err');
+
+      // update status badge
+      const oldBadge = card.querySelector('.badge:not(.badge-branch)');
+      const newBadge = badge(ok ? 'success' : 'error', ok ? '✓ success' : '✗ failed');
+      if (oldBadge) oldBadge.replaceWith(newBadge);
+      else card.querySelector('.card-title-row').appendChild(newBadge);
+
+      // update deploy time
+      const clockSpan = card.querySelectorAll('.meta-row')[2]?.querySelector('.meta-text');
+      if (clockSpan) clockSpan.textContent = 'Last deploy just now';
+
+      // restore button
+      btn.disabled = false;
+      btn.className = 'deploy-btn';
+      btn.innerHTML = `${IC.play} Deploy`;
+
+      if (!ok) toast(`Deploy failed for project ${projectId}`, true);
+    }
+  };
+
+  es.onerror = () => {
+    // Retry silently — server may still be starting the process
+    if (streams[projectId] === es) {
+      setTimeout(() => {
+        // Only reconnect if still flagged as deploying
+        if (card.classList.contains('deploying')) {
+          connectStream(projectId, card, btn, logOut, logTitle);
+        }
+      }, 2000);
+    }
+  };
+}
+
+async function showHistory(projectId, logPanel, logOut, logTitle) {
+  logOut.innerHTML = '';
+  logPanel.classList.add('open');
+  logTitle.textContent = 'Loading history…';
+
+  try {
+    const history = await api('GET', `/api/projects/${projectId}/history`);
+    if (!history.length) {
+      logTitle.textContent = 'No history';
+      const d = document.createElement('div');
+      d.className = 'log-line log-dim';
+      d.textContent = 'No deploys yet.';
+      logOut.appendChild(d);
+      return;
+    }
+
+    history.forEach(deploy => {
+      const icon = deploy.success === true ? '✓' : deploy.success === false ? '✗' : '⟳';
+      const head = document.createElement('div');
+      head.className = 'log-line log-head';
+      head.textContent = `${icon} ${deploy.id}  ${ago(deploy.started_at)}`;
+      logOut.appendChild(head);
+      (deploy.output || []).slice(-30).forEach(line => {
+        const d = document.createElement('div');
+        d.className = 'log-line log-dim';
+        d.textContent = line;
+        logOut.appendChild(d);
+      });
+    });
+
+    logTitle.textContent = `History · ${history.length} deploy${history.length !== 1?'s':''}`;
+    logOut.scrollTop = 0;
+  } catch(err) {
+    logTitle.textContent = 'Error loading history';
+    toast(err.message, true);
+  }
+}
+
+// ── Load projects ──────────────────────────────────────────────────────────
+async function loadProjects() {
+  const root = document.getElementById('root');
+  try {
+    const projects = await api('GET', '/api/projects');
+    root.className = '';
+    root.innerHTML = '';
+
+    if (!projects.length) {
+      root.className = 'page-state';
+      root.innerHTML = `
+        <p>No projects configured.</p>
+        <p>Add entries to your <code>.env</code> file:</p>
+        <p><code>PROJECT_1_NAME=My App</code></p>
+        <p><code>PROJECT_1_PATH=/home/user/my-app</code></p>
+        <p><code>PROJECT_1_SCRIPT=./rebuild.sh</code></p>`;
+      return;
+    }
+
+    const grid = document.createElement('div'); grid.className = 'grid';
+    projects.forEach(p => grid.appendChild(buildCard(p)));
+    root.appendChild(grid);
+
+    const bar = document.createElement('div');
+    bar.className = 'status-bar';
+    bar.id = 'status-bar';
+    bar.textContent = `${projects.length} project${projects.length!==1?'s':''} · updated just now`;
+    root.insertBefore(bar, grid);
+  } catch(err) {
+    root.className = 'page-state';
+    root.innerHTML = `<p style="color:var(--red)">Failed to load: ${err.message}</p>`;
+  }
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+loadProjects();
+setInterval(() => {
+  if (Object.keys(streams).length === 0) loadProjects();
+}, 30000);
+</script>
+</body>
+</html>
