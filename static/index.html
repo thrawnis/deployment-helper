@@ -267,6 +267,12 @@ function ago(iso) {
   if (s < 86400) return `${Math.floor(s/3600)}h ago`;
   return new Date(iso).toLocaleDateString();
 }
+function fmtDatetime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
 function clip(s, n=58) { return s && s.length > n ? s.slice(0,n)+'…' : (s||''); }
 function toast(msg, err=false) {
   const d = document.createElement('div');
@@ -366,7 +372,7 @@ function buildCard(p) {
   meta.append(
     metaRow(IC.branch, branchBadge),
     metaRow(IC.commit, clip(git.last_commit || 'No commits')),
-    metaRow(IC.clock,  last_deploy ? `Last deploy ${ago(last_deploy.started_at)}` : 'Never deployed'),
+    metaRow(IC.clock,  last_deploy ? `${fmtDatetime(last_deploy.started_at)} (${ago(last_deploy.started_at)})` : 'Never deployed'),
   );
 
   const top = document.createElement('div'); top.className = 'card-top';
@@ -438,7 +444,7 @@ function connectStream(projectId, card, btn, logOut, logTitle) {
 
       // update deploy time
       const clockSpan = card.querySelectorAll('.meta-row')[2]?.querySelector('.meta-text');
-      if (clockSpan) clockSpan.textContent = 'Last deploy just now';
+      if (clockSpan) clockSpan.textContent = `${fmtDatetime(new Date().toISOString())} (just now)`;
 
       // restore button
       btn.disabled = false;
