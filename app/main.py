@@ -122,6 +122,14 @@ def get_git_info(path: str) -> dict:
 # ── Routes ─────────────────────────────────────────────────────────────────
 
 
+def _dashboard_deploy_active() -> bool:
+    return any(
+        _is_dashboard(PROJECT_MAP[pid]) and not s.done
+        for pid, s in _active.items()
+        if pid in PROJECT_MAP
+    )
+
+
 def _any_other_deploy_active(project_id: str) -> bool:
     return any(
         pid != project_id and not s.done
@@ -144,7 +152,8 @@ async def list_projects() -> list[dict]:
         state = _active.get(p["id"])
         is_deploying = bool(state and not state.done)
         deploy_blocked = (
-            _is_dashboard(p) and _any_other_deploy_active(p["id"])
+            (_is_dashboard(p) and _any_other_deploy_active(p["id"]))
+            or (not _is_dashboard(p) and _dashboard_deploy_active())
         )
         result.append(
             {
@@ -170,6 +179,9 @@ async def start_deploy(project_id: str) -> dict:
 
     if _is_dashboard(project) and _any_other_deploy_active(project_id):
         raise HTTPException(409, "Cannot redeploy dashboard while another deploy is in progress")
+
+    if not _is_dashboard(project) and _dashboard_deploy_active():
+        raise HTTPException(409, "Cannot deploy while Deployment Helper is redeploying")
 
     state = DeployState(str(uuid.uuid4())[:8])
     _active[project_id] = state

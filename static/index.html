@@ -343,7 +343,9 @@ function buildCard(p) {
   const btn = document.createElement('button');
   btn.className = 'deploy-btn' + (is_deploying ? ' deploying' : '');
   btn.disabled = is_deploying || deploy_blocked;
-  if (deploy_blocked) btn.title = 'Another deploy is in progress — wait for it to finish before redeploying the dashboard';
+  if (deploy_blocked) btn.title = isDashboard(name)
+    ? 'Another deploy is in progress — wait for it to finish before redeploying the dashboard'
+    : 'Deployment Helper is redeploying — wait for it to come back before deploying other projects';
   btn.innerHTML = is_deploying
     ? `<span class="spin"></span> Deploying…`
     : `${IC.play} Deploy`;
