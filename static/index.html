@@ -273,6 +273,13 @@ function fmtDatetime(iso) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
     + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
+function fmtDuration(startIso, endIso) {
+  if (!startIso || !endIso) return null;
+  const s = Math.round((new Date(endIso) - new Date(startIso)) / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60), r = s % 60;
+  return r > 0 ? `${m}m ${r}s` : `${m}m`;
+}
 function clip(s, n=58) { return s && s.length > n ? s.slice(0,n)+'…' : (s||''); }
 function toast(msg, err=false) {
   const d = document.createElement('div');
@@ -372,7 +379,7 @@ function buildCard(p) {
   meta.append(
     metaRow(IC.branch, branchBadge),
     metaRow(IC.commit, clip(git.last_commit || 'No commits')),
-    metaRow(IC.clock,  last_deploy ? `${fmtDatetime(last_deploy.started_at)} (${ago(last_deploy.started_at)})` : 'Never deployed'),
+    metaRow(IC.clock,  last_deploy ? `${fmtDatetime(last_deploy.started_at)} (${ago(last_deploy.started_at)})${fmtDuration(last_deploy.started_at, last_deploy.finished_at) ? ' · ' + fmtDuration(last_deploy.started_at, last_deploy.finished_at) : ''}` : 'Never deployed'),
   );
 
   const top = document.createElement('div'); top.className = 'card-top';
