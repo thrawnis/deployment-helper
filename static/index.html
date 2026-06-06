@@ -488,10 +488,12 @@ function connectStream(projectId, card, btn, logOut, logTitle, projectName = '')
       const clockSpan = card.querySelectorAll('.meta-row')[2]?.querySelector('.meta-text');
       if (clockSpan) clockSpan.textContent = `${fmtDatetime(new Date().toISOString())} (just now)`;
 
-      // restore button
-      btn.disabled = false;
-      btn.className = 'deploy-btn';
-      btn.innerHTML = `${IC.play} Deploy`;
+      // restore button (not for dashboard — page reloads handle that)
+      if (!isDashboard(projectName)) {
+        btn.disabled = false;
+        btn.className = 'deploy-btn';
+        btn.innerHTML = `${IC.play} Deploy`;
+      }
 
       if (!ok) toast(`Deploy failed for project ${projectId}`, true);
     }
