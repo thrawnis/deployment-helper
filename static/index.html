@@ -400,7 +400,7 @@ function buildCard(p) {
       logOut.innerHTML = '';
       logPanel.classList.add('open');
       logTitle.textContent = 'Connecting…';
-      connectStream(id, card, btn, logOut, logTitle);
+      connectStream(id, card, btn, logOut, logTitle, name);
     } catch(err) {
       toast(err.message, true);
     }
@@ -408,13 +408,30 @@ function buildCard(p) {
 
   // reconnect if already deploying
   if (is_deploying) {
-    connectStream(id, card, btn, logOut, logTitle);
+    connectStream(id, card, btn, logOut, logTitle, name);
   }
 
   return card;
 }
 
-function connectStream(projectId, card, btn, logOut, logTitle) {
+const DASHBOARD_NAME = 'deployment helper';
+function isDashboard(name) { return name.trim().toLowerCase() === DASHBOARD_NAME; }
+
+function waitForRestart(logTitle) {
+  logTitle.textContent = 'Container restarting — waiting for it to come back…';
+  const interval = setInterval(async () => {
+    try {
+      const r = await fetch('/api/projects');
+      if (r.ok) {
+        clearInterval(interval);
+        logTitle.textContent = '✓ Back online — reloading in 2s…';
+        setTimeout(() => location.reload(), 2000);
+      }
+    } catch (_) { /* still down, keep polling */ }
+  }, 10000);
+}
+
+function connectStream(projectId, card, btn, logOut, logTitle, projectName = '') {
   if (streams[projectId]) { streams[projectId].close(); }
 
   card.className = card.className.replace(/deploy-ok|deploy-err/g,'').trim() + ' deploying';
@@ -466,12 +483,18 @@ function connectStream(projectId, card, btn, logOut, logTitle) {
   };
 
   es.onerror = () => {
-    // Retry silently — server may still be starting the process
-    if (streams[projectId] === es) {
+    if (streams[projectId] !== es) return;
+    es.close();
+    delete streams[projectId];
+
+    if (isDashboard(projectName)) {
+      // Container is going down — poll until it's back
+      waitForRestart(logTitle);
+    } else {
+      // Retry silently for other projects — server may still be starting
       setTimeout(() => {
-        // Only reconnect if still flagged as deploying
         if (card.classList.contains('deploying')) {
-          connectStream(projectId, card, btn, logOut, logTitle);
+          connectStream(projectId, card, btn, logOut, logTitle, projectName);
         }
       }, 2000);
     }
