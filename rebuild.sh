@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "==> Switching to dev branch and pulling latest..."
+git checkout dev
+git pull origin dev
+
 echo "==> Stopping existing container..."
 docker compose down
 
