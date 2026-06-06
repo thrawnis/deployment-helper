@@ -568,10 +568,11 @@ async function showHistory(projectId, logPanel, logOut, logTitle) {
 }
 
 // ── Load projects ──────────────────────────────────────────────────────────
-async function loadProjects() {
+async function loadProjects(retries = 5, delay = 2000) {
   const root = document.getElementById('root');
-  try {
-    const projects = await api('GET', '/api/projects');
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const projects = await api('GET', '/api/projects');
     root.className = '';
     root.innerHTML = '';
 
@@ -594,10 +595,17 @@ async function loadProjects() {
     bar.className = 'status-bar';
     bar.id = 'status-bar';
     bar.textContent = `${projects.length} project${projects.length!==1?'s':''} · updated just now`;
-    root.insertBefore(bar, grid);
-  } catch(err) {
-    root.className = 'page-state';
-    root.innerHTML = `<p style="color:var(--red)">Failed to load: ${err.message}</p>`;
+      root.insertBefore(bar, grid);
+      return; // success — stop retrying
+    } catch(err) {
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        root.className = 'page-state';
+        root.innerHTML = `<p style="color:var(--red)">Failed to load: ${err.message}</p>
+          <p style="margin-top:0.5rem"><button class="refresh-btn" onclick="loadProjects()">↻ Retry</button></p>`;
+      }
+    }
   }
 }
 
