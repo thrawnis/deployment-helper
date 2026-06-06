@@ -171,14 +171,14 @@
       font-family: var(--mono); flex: 1;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .log-close {
+    .log-close, .log-download {
       background: none; border: none;
       color: var(--muted); cursor: pointer;
       font-size: 0.875rem; padding: 0.2rem 0.3rem;
       border-radius: 0.25rem; line-height: 1;
       flex-shrink: 0;
     }
-    .log-close:hover { color: var(--text); background: var(--surface2); }
+    .log-close:hover, .log-download:hover { color: var(--text); background: var(--surface2); }
 
     .log-output {
       padding: 0.625rem 0.875rem;
@@ -352,10 +352,21 @@ function buildCard(p) {
 
   // log panel
   const logOut   = document.createElement('div');  logOut.className = 'log-output';
-  const logTitle = document.createElement('span'); logTitle.className = 'log-title'; logTitle.textContent = 'Deploy log';
-  const closeBtn = document.createElement('button'); closeBtn.className = 'log-close'; closeBtn.textContent = '✕';
-  const toolbar  = document.createElement('div');  toolbar.className = 'log-toolbar';
-  toolbar.append(logTitle, closeBtn);
+  const logTitle    = document.createElement('span');  logTitle.className = 'log-title'; logTitle.textContent = 'Deploy log';
+  const dlBtn       = document.createElement('button'); dlBtn.className = 'log-download'; dlBtn.title = 'Download log'; dlBtn.textContent = '⬇';
+  const closeBtn    = document.createElement('button'); closeBtn.className = 'log-close';    closeBtn.textContent = '✕';
+  const toolbar     = document.createElement('div');    toolbar.className = 'log-toolbar';
+  toolbar.append(logTitle, dlBtn, closeBtn);
+
+  dlBtn.onclick = () => {
+    const lines = Array.from(logOut.querySelectorAll('.log-line')).map(l => l.textContent).join('\n');
+    const blob = new Blob([lines], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${name.replace(/\s+/g, '-').toLowerCase()}-deploy.log.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
   const logPanel = document.createElement('div');
   logPanel.className = 'log-panel' + (is_deploying ? ' open' : '');
   logPanel.append(toolbar, logOut);
