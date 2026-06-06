@@ -381,7 +381,7 @@ function buildCard(p) {
     metaRow(IC.commit, clip(git.last_commit || 'No commits')),
     metaRow(IC.clock,  last_deploy ? `${fmtDatetime(last_deploy.started_at)} (${ago(last_deploy.started_at)})` : 'Never deployed'),
     ...(last_deploy && fmtDuration(last_deploy.started_at, last_deploy.finished_at)
-      ? [metaRow(IC.clock, `Processing time: ${fmtDuration(last_deploy.started_at, last_deploy.finished_at)}`)]
+      ? [metaRow(IC.clock, `Run time: ${fmtDuration(last_deploy.started_at, last_deploy.finished_at)}`)]
       : []),
   );
 
