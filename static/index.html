@@ -313,7 +313,7 @@ function metaRow(iconHtml, content) {
 }
 
 function buildCard(p) {
-  const { id, name, git, last_deploy, is_deploying } = p;
+  const { id, name, git, last_deploy, is_deploying, deploy_blocked } = p;
 
   // status badge
   let statusBadge = null;
@@ -328,7 +328,8 @@ function buildCard(p) {
   // deploy button
   const btn = document.createElement('button');
   btn.className = 'deploy-btn' + (is_deploying ? ' deploying' : '');
-  btn.disabled = is_deploying;
+  btn.disabled = is_deploying || deploy_blocked;
+  if (deploy_blocked) btn.title = 'Another deploy is in progress — wait for it to finish before redeploying the dashboard';
   btn.innerHTML = is_deploying
     ? `<span class="spin"></span> Deploying…`
     : `${IC.play} Deploy`;
