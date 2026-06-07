@@ -390,7 +390,7 @@ function buildCard(p) {
   const dockerLogsBtn = document.createElement('button');
   dockerLogsBtn.className = 'history-btn';
   dockerLogsBtn.title = 'docker compose logs api --tail=50';
-  dockerLogsBtn.innerHTML = IC.logs + ' logs';
+  dockerLogsBtn.innerHTML = IC.logs + ' Docker logs';
   dockerLogsBtn.onclick = () => showDockerLogs(id, name, logPanel, logOut, logTitle);
 
   // assemble card
