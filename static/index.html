@@ -612,7 +612,8 @@ async function loadProjects(retries = 5, delay = 2000) {
 // ── Init ───────────────────────────────────────────────────────────────────
 loadProjects();
 setInterval(() => {
-  if (Object.keys(streams).length === 0) loadProjects();
+  const anyLogOpen = document.querySelector('.log-panel.open') !== null;
+  if (Object.keys(streams).length === 0 && !anyLogOpen) loadProjects();
 }, 30000);
 </script>
 </body>
