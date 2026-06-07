@@ -223,7 +223,24 @@ async def get_history(project_id: str) -> list:
     return _load_history().get(project_id, [])
 
 
-# ── Deploy runner ──────────────────────────────────────────────────────────
+@app.get("/api/projects/{project_id}/docker-logs")
+async def docker_logs(project_id: str) -> dict:
+    project = PROJECT_MAP.get(project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "logs", "api", "--tail=50", "--no-color"],
+            cwd=project["path"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        output = result.stdout or result.stderr or "(no output)"
+    except Exception as exc:
+        output = f"ERROR: {exc}"
+    return {"output": output}
+
 
 
 async def _run_deploy(project_id: str, project: dict, state: DeployState) -> None:
