@@ -384,7 +384,7 @@ function buildCard(p) {
   // history button
   const histBtn = document.createElement('button');
   histBtn.className = 'history-btn';
-  histBtn.textContent = 'history';
+  histBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/><polyline points="3.05 11 3 12a9 9 0 1 0 .5-3"/><polyline points="1 8 3 11 6 9"/></svg> history`;
   histBtn.onclick = () => showHistory(id, logPanel, logOut, logTitle);
 
   const dockerLogsBtn = document.createElement('button');
