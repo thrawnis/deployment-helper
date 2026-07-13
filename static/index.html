@@ -301,6 +301,13 @@ window.addEventListener('beforeunload', e => {
   }
 });
 
+window.addEventListener('beforeunload', e => {
+  if (Object.keys(streams).length > 0) {
+    e.preventDefault();
+    e.returnValue = 'A deploy is in progress. Are you sure you want to leave?';
+  }
+});
+
 // ── API ────────────────────────────────────────────────────────────────────
 async function api(method, path) {
   const r = await fetch(path, { method });
