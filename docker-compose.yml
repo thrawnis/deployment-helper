@@ -1,6 +1,6 @@
 services:
   dashboard:
-    build: .
+    image: deployment-helper-dashboard:latest
     restart: unless-stopped
     ports:
       - "8089:8000"
@@ -12,4 +12,3 @@ services:
       # Docker socket — allows deploy scripts to run docker/docker compose commands
       - /var/run/docker.sock:/var/run/docker.sock
       - /media/docker:/media/docker
-
