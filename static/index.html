@@ -78,7 +78,11 @@
       flex-direction: column;
       transition: border-color 0.2s;
     }
-    .card.deploying { border-color: var(--teal); }
+    .card.deploying {
+      border-color: var(--yellow);
+      box-shadow: 0 0 0 1px rgba(245,158,11,0.25), 0 0 16px rgba(245,158,11,0.12);
+      background: rgba(245,158,11,0.04);
+    }
     .card.deploy-ok  { border-color: rgba(16,185,129,0.5); }
     .card.deploy-err { border-color: rgba(239,68,68,0.4); }
 
