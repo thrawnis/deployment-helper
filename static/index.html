@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Deployment Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230f1623'/><polygon points='10,8 24,16 10,24' fill='%230d9488'/></svg>">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -77,7 +78,11 @@
       flex-direction: column;
       transition: border-color 0.2s;
     }
-    .card.deploying { border-color: var(--teal); }
+    .card.deploying {
+      border-color: var(--yellow);
+      box-shadow: 0 0 0 1px rgba(245,158,11,0.25), 0 0 16px rgba(245,158,11,0.12);
+      background: rgba(245,158,11,0.04);
+    }
     .card.deploy-ok  { border-color: rgba(16,185,129,0.5); }
     .card.deploy-err { border-color: rgba(239,68,68,0.4); }
 
@@ -170,14 +175,14 @@
       font-family: var(--mono); flex: 1;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .log-close {
+    .log-close, .log-download {
       background: none; border: none;
       color: var(--muted); cursor: pointer;
       font-size: 0.875rem; padding: 0.2rem 0.3rem;
       border-radius: 0.25rem; line-height: 1;
       flex-shrink: 0;
     }
-    .log-close:hover { color: var(--text); background: var(--surface2); }
+    .log-close:hover, .log-download:hover { color: var(--text); background: var(--surface2); }
 
     .log-output {
       padding: 0.625rem 0.875rem;
@@ -255,6 +260,7 @@ const IC = {
   clock:  `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
   play:   `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>`,
   folder: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
+  logs:   `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`,
 };
 
 // ── Utils ──────────────────────────────────────────────────────────────────
@@ -267,6 +273,19 @@ function ago(iso) {
   if (s < 86400) return `${Math.floor(s/3600)}h ago`;
   return new Date(iso).toLocaleDateString();
 }
+function fmtDatetime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+function fmtDuration(startIso, endIso) {
+  if (!startIso || !endIso) return null;
+  const s = Math.round((new Date(endIso) - new Date(startIso)) / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60), r = s % 60;
+  return r > 0 ? `${m}m ${r}s` : `${m}m`;
+}
 function clip(s, n=58) { return s && s.length > n ? s.slice(0,n)+'…' : (s||''); }
 function toast(msg, err=false) {
   const d = document.createElement('div');
@@ -278,6 +297,20 @@ function toast(msg, err=false) {
 
 // ── State ──────────────────────────────────────────────────────────────────
 const streams = {}; // project_id -> EventSource
+
+window.addEventListener('beforeunload', e => {
+  if (Object.keys(streams).length > 0) {
+    e.preventDefault();
+    e.returnValue = 'A deploy is in progress. Are you sure you want to leave?';
+  }
+});
+
+window.addEventListener('beforeunload', e => {
+  if (Object.keys(streams).length > 0) {
+    e.preventDefault();
+    e.returnValue = 'A deploy is in progress. Are you sure you want to leave?';
+  }
+});
 
 // ── API ────────────────────────────────────────────────────────────────────
 async function api(method, path) {
@@ -313,7 +346,7 @@ function metaRow(iconHtml, content) {
 }
 
 function buildCard(p) {
-  const { id, name, git, last_deploy, is_deploying } = p;
+  const { id, name, git, last_deploy, is_deploying, deploy_blocked } = p;
 
   // status badge
   let statusBadge = null;
@@ -328,17 +361,32 @@ function buildCard(p) {
   // deploy button
   const btn = document.createElement('button');
   btn.className = 'deploy-btn' + (is_deploying ? ' deploying' : '');
-  btn.disabled = is_deploying;
+  btn.disabled = is_deploying || deploy_blocked;
+  if (deploy_blocked) btn.title = isDashboard(name)
+    ? 'Another deploy is in progress — wait for it to finish before redeploying the dashboard'
+    : 'Deployment Helper is redeploying — wait for it to come back before deploying other projects';
   btn.innerHTML = is_deploying
     ? `<span class="spin"></span> Deploying…`
     : `${IC.play} Deploy`;
 
   // log panel
   const logOut   = document.createElement('div');  logOut.className = 'log-output';
-  const logTitle = document.createElement('span'); logTitle.className = 'log-title'; logTitle.textContent = 'Deploy log';
-  const closeBtn = document.createElement('button'); closeBtn.className = 'log-close'; closeBtn.textContent = '✕';
-  const toolbar  = document.createElement('div');  toolbar.className = 'log-toolbar';
-  toolbar.append(logTitle, closeBtn);
+  const logTitle    = document.createElement('span');  logTitle.className = 'log-title'; logTitle.textContent = 'Deploy log';
+  const dlBtn       = document.createElement('button'); dlBtn.className = 'log-download'; dlBtn.title = 'Download log';
+  dlBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+  const closeBtn    = document.createElement('button'); closeBtn.className = 'log-close';    closeBtn.textContent = '✕';
+  const toolbar     = document.createElement('div');    toolbar.className = 'log-toolbar';
+  toolbar.append(logTitle, dlBtn, closeBtn);
+
+  dlBtn.onclick = () => {
+    const lines = Array.from(logOut.querySelectorAll('.log-line')).map(l => l.textContent).join('\n');
+    const blob = new Blob([lines], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${name.replace(/\s+/g, '-').toLowerCase()}-deploy.log.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
   const logPanel = document.createElement('div');
   logPanel.className = 'log-panel' + (is_deploying ? ' open' : '');
   logPanel.append(toolbar, logOut);
@@ -347,8 +395,14 @@ function buildCard(p) {
   // history button
   const histBtn = document.createElement('button');
   histBtn.className = 'history-btn';
-  histBtn.textContent = 'history';
+  histBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/><polyline points="3.05 11 3 12a9 9 0 1 0 .5-3"/><polyline points="1 8 3 11 6 9"/></svg> history`;
   histBtn.onclick = () => showHistory(id, logPanel, logOut, logTitle);
+
+  const dockerLogsBtn = document.createElement('button');
+  dockerLogsBtn.className = 'history-btn';
+  dockerLogsBtn.title = 'docker compose logs api --tail=50';
+  dockerLogsBtn.innerHTML = IC.logs + ' Docker logs';
+  dockerLogsBtn.onclick = () => showDockerLogs(id, name, logPanel, logOut, logTitle);
 
   // assemble card
   const card = document.createElement('div');
@@ -365,14 +419,20 @@ function buildCard(p) {
   meta.append(
     metaRow(IC.branch, branchBadge),
     metaRow(IC.commit, clip(git.last_commit || 'No commits')),
-    metaRow(IC.clock,  last_deploy ? `Last deploy ${ago(last_deploy.started_at)}` : 'Never deployed'),
+    metaRow(IC.clock,  last_deploy ? `${fmtDatetime(last_deploy.started_at)} (${ago(last_deploy.started_at)})` : 'Never deployed'),
+    ...(last_deploy && fmtDuration(last_deploy.started_at, last_deploy.finished_at)
+      ? [metaRow(IC.clock, `Run time: ${fmtDuration(last_deploy.started_at, last_deploy.finished_at)}`)]
+      : []),
   );
 
   const top = document.createElement('div'); top.className = 'card-top';
   top.append(titleRow, meta);
 
   const footer = document.createElement('div'); footer.className = 'card-footer';
-  footer.append(histBtn, btn);
+  const footerLeft = document.createElement('div');
+  footerLeft.style.cssText = 'display:flex;gap:0.75rem;align-items:center;';
+  footerLeft.append(histBtn, dockerLogsBtn);
+  footer.append(footerLeft, btn);
 
   card.append(top, footer, logPanel);
 
@@ -383,7 +443,7 @@ function buildCard(p) {
       logOut.innerHTML = '';
       logPanel.classList.add('open');
       logTitle.textContent = 'Connecting…';
-      connectStream(id, card, btn, logOut, logTitle);
+      connectStream(id, card, btn, logOut, logTitle, name);
     } catch(err) {
       toast(err.message, true);
     }
@@ -391,13 +451,34 @@ function buildCard(p) {
 
   // reconnect if already deploying
   if (is_deploying) {
-    connectStream(id, card, btn, logOut, logTitle);
+    connectStream(id, card, btn, logOut, logTitle, name);
   }
 
   return card;
 }
 
-function connectStream(projectId, card, btn, logOut, logTitle) {
+const DASHBOARD_NAME = 'deployment helper';
+function isDashboard(name) { return name.trim().toLowerCase() === DASHBOARD_NAME; }
+
+function waitForRestart(logTitle) {
+  logTitle.textContent = 'Container restarting — waiting for it to come back…';
+  const interval = setInterval(async () => {
+    try {
+      const r = await fetch('/api/projects');
+      if (r.ok) {
+        clearInterval(interval);
+        logTitle.textContent = '✓ Back online — reloading in 2s…';
+        setTimeout(() => {
+          // Clear streams so the beforeunload warning doesn't block the auto-reload
+          Object.keys(streams).forEach(k => { streams[k].close(); delete streams[k]; });
+          location.reload();
+        }, 2000);
+      }
+    } catch (_) { /* still down, keep polling */ }
+  }, 5000);
+}
+
+function connectStream(projectId, card, btn, logOut, logTitle, projectName = '') {
   if (streams[projectId]) { streams[projectId].close(); }
 
   card.className = card.className.replace(/deploy-ok|deploy-err/g,'').trim() + ' deploying';
@@ -437,28 +518,71 @@ function connectStream(projectId, card, btn, logOut, logTitle) {
 
       // update deploy time
       const clockSpan = card.querySelectorAll('.meta-row')[2]?.querySelector('.meta-text');
-      if (clockSpan) clockSpan.textContent = 'Last deploy just now';
+      if (clockSpan) clockSpan.textContent = `${fmtDatetime(new Date().toISOString())} (just now)`;
 
-      // restore button
-      btn.disabled = false;
-      btn.className = 'deploy-btn';
-      btn.innerHTML = `${IC.play} Deploy`;
+      // restore button (not for dashboard — page reloads handle that)
+      if (!isDashboard(projectName)) {
+        btn.disabled = false;
+        btn.className = 'deploy-btn';
+        btn.innerHTML = `${IC.play} Deploy`;
+      }
 
       if (!ok) toast(`Deploy failed for project ${projectId}`, true);
     }
   };
 
   es.onerror = () => {
-    // Retry silently — server may still be starting the process
-    if (streams[projectId] === es) {
+    if (streams[projectId] !== es) return;
+    es.close();
+    delete streams[projectId];
+
+    if (isDashboard(projectName)) {
+      // Container is going down — poll until it's back
+      waitForRestart(logTitle);
+    } else {
+      // Retry silently for other projects — server may still be starting
       setTimeout(() => {
-        // Only reconnect if still flagged as deploying
         if (card.classList.contains('deploying')) {
-          connectStream(projectId, card, btn, logOut, logTitle);
+          connectStream(projectId, card, btn, logOut, logTitle, projectName);
         }
       }, 2000);
     }
   };
+}
+
+async function showDockerLogs(projectId, projectName, logPanel, logOut, logTitle) {
+  logOut.innerHTML = '';
+  logPanel.classList.add('open');
+  logTitle.textContent = 'Fetching docker logs…';
+
+  try {
+    const { output } = await api('GET', `/api/projects/${projectId}/docker-logs`);
+    logOut.innerHTML = '';
+    output.split('\n').forEach(line => {
+      const d = document.createElement('div');
+      d.className = 'log-line';
+      d.textContent = line;
+      logOut.appendChild(d);
+    });
+    logOut.scrollTop = logOut.scrollHeight;
+    logTitle.textContent = 'docker compose logs api --tail=50';
+
+    // wire download button to this content
+    const dlBtn = logPanel.querySelector('.log-download');
+    if (dlBtn) {
+      dlBtn.onclick = () => {
+        const blob = new Blob([output], { type: 'text/plain' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${projectName.replace(/\s+/g, '-').toLowerCase()}-docker.log.txt`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      };
+    }
+  } catch(err) {
+    logTitle.textContent = 'Error fetching logs';
+    toast(err.message, true);
+  }
 }
 
 async function showHistory(projectId, logPanel, logOut, logTitle) {
@@ -500,10 +624,11 @@ async function showHistory(projectId, logPanel, logOut, logTitle) {
 }
 
 // ── Load projects ──────────────────────────────────────────────────────────
-async function loadProjects() {
+async function loadProjects(retries = 5, delay = 2000) {
   const root = document.getElementById('root');
-  try {
-    const projects = await api('GET', '/api/projects');
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const projects = await api('GET', '/api/projects');
     root.className = '';
     root.innerHTML = '';
 
@@ -526,17 +651,25 @@ async function loadProjects() {
     bar.className = 'status-bar';
     bar.id = 'status-bar';
     bar.textContent = `${projects.length} project${projects.length!==1?'s':''} · updated just now`;
-    root.insertBefore(bar, grid);
-  } catch(err) {
-    root.className = 'page-state';
-    root.innerHTML = `<p style="color:var(--red)">Failed to load: ${err.message}</p>`;
+      root.insertBefore(bar, grid);
+      return; // success — stop retrying
+    } catch(err) {
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        root.className = 'page-state';
+        root.innerHTML = `<p style="color:var(--red)">Failed to load: ${err.message}</p>
+          <p style="margin-top:0.5rem"><button class="refresh-btn" onclick="loadProjects()">↻ Retry</button></p>`;
+      }
+    }
   }
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
 loadProjects();
 setInterval(() => {
-  if (Object.keys(streams).length === 0) loadProjects();
+  const anyLogOpen = document.querySelector('.log-panel.open') !== null;
+  if (Object.keys(streams).length === 0 && !anyLogOpen) loadProjects();
 }, 30000);
 </script>
 </body>
