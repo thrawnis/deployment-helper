@@ -829,9 +829,12 @@ async function renderAdminEditor() {
 
   const addTitle = document.createElement('div');
   addTitle.className = 'admin-section-title';
+  addTitle.id = 'admin-add-title';
   addTitle.textContent = 'Add Project';
   adminBody.appendChild(addTitle);
-  adminBody.appendChild(adminProjectForm(null));
+  const addForm = adminProjectForm(null);
+  addForm.id = 'admin-add-form';
+  adminBody.appendChild(addForm);
 
   const footer = document.createElement('div');
   footer.className = 'modal-footer';
@@ -844,6 +847,22 @@ async function renderAdminEditor() {
   };
   footer.appendChild(logoutBtn);
   adminBody.appendChild(footer);
+}
+
+function cloneProjectIntoAddForm(project) {
+  const form = document.getElementById('admin-add-form');
+  if (!form) return;
+
+  form.querySelector('[name="name"]').value = `${project.name} (copy)`;
+  form.querySelector('[name="path"]').value = project.path;
+  form.querySelector('[name="script"]').value = project.script;
+
+  const addTitle = document.getElementById('admin-add-title');
+  if (addTitle) addTitle.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  const nameInput = form.querySelector('[name="name"]');
+  nameInput.focus();
+  nameInput.select();
 }
 
 function adminProjectRow(project) {
@@ -874,6 +893,13 @@ function adminProjectForm(project) {
   actions.className = 'row-actions';
 
   if (isEdit) {
+    const cloneBtn = document.createElement('button');
+    cloneBtn.type = 'button';
+    cloneBtn.className = 'btn-secondary';
+    cloneBtn.textContent = 'Clone';
+    cloneBtn.onclick = () => cloneProjectIntoAddForm(project);
+    actions.appendChild(cloneBtn);
+
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'btn-secondary btn-danger';
