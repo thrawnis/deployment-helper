@@ -4,13 +4,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import secrets
 import subprocess
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -21,11 +23,20 @@ load_dotenv()
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 HISTORY_FILE = DATA_DIR / "history.json"
+CONFIG_FILE = DATA_DIR / "projects.json"
 MAX_HISTORY = 5
 DEPLOY_STATE_TTL = 120  # seconds to keep finished deploy state in memory
+DASHBOARD_NAME = "deployment helper"
+
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+SESSION_COOKIE = "admin_session"
+SESSION_TTL = 8 * 3600  # 8 hours
+
+# ── Project config (stored in DATA_DIR, editable via the admin UI) ─────────
 
 
-def _load_projects() -> list[dict]:
+def _seed_config_from_env() -> list[dict]:
+    """One-time migration: read legacy PROJECT_N_* vars from .env."""
     projects: list[dict] = []
     i = 1
     while name := os.getenv(f"PROJECT_{i}_NAME"):
@@ -41,13 +52,34 @@ def _load_projects() -> list[dict]:
     return projects
 
 
-DASHBOARD_NAME = "deployment helper"
+def _load_config() -> list[dict]:
+    if not CONFIG_FILE.exists():
+        seeded = _seed_config_from_env()
+        _save_config(seeded)
+        return seeded
+    try:
+        return json.loads(CONFIG_FILE.read_text())
+    except json.JSONDecodeError:
+        return []
 
-PROJECTS: list[dict] = sorted(
-    _load_projects(),
-    key=lambda p: (p["name"].strip().lower() == DASHBOARD_NAME, p["name"].strip().lower()),
-)
-PROJECT_MAP: dict[str, dict] = {p["id"]: p for p in PROJECTS}
+
+def _save_config(projects: list[dict]) -> None:
+    CONFIG_FILE.write_text(json.dumps(projects, indent=2))
+
+
+def get_projects() -> list[dict]:
+    return sorted(
+        _load_config(),
+        key=lambda p: (
+            p["name"].strip().lower() == DASHBOARD_NAME,
+            p["name"].strip().lower(),
+        ),
+    )
+
+
+def get_project_map() -> dict[str, dict]:
+    return {p["id"]: p for p in get_projects()}
+
 
 # ── App ────────────────────────────────────────────────────────────────────
 
@@ -61,7 +93,7 @@ async def root() -> FileResponse:
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ── Persistence ────────────────────────────────────────────────────────────
+# ── Deploy history persistence ──────────────────────────────────────────────
 
 
 def _load_history() -> dict:
@@ -90,6 +122,32 @@ class DeployState:
 
 # project_id -> DeployState (kept for DEPLOY_STATE_TTL seconds after completion)
 _active: dict[str, DeployState] = {}
+
+# ── Admin auth ───────────────────────────────────────────────────────────────
+
+_sessions: dict[str, float] = {}  # token -> expiry epoch seconds
+
+
+def _new_session() -> str:
+    token = secrets.token_urlsafe(32)
+    _sessions[token] = time.time() + SESSION_TTL
+    return token
+
+
+def _valid_session(token: str | None) -> bool:
+    if not token:
+        return False
+    expiry = _sessions.get(token)
+    if not expiry or expiry < time.time():
+        _sessions.pop(token, None)
+        return False
+    return True
+
+
+async def require_admin(request: Request) -> None:
+    if not _valid_session(request.cookies.get(SESSION_COOKIE)):
+        raise HTTPException(401, "Admin authentication required")
+
 
 # ── Git helpers ────────────────────────────────────────────────────────────
 
@@ -123,10 +181,10 @@ def get_git_info(path: str) -> dict:
 
 
 def _dashboard_deploy_active() -> bool:
+    project_map = get_project_map()
     return any(
-        _is_dashboard(PROJECT_MAP[pid]) and not s.done
+        pid in project_map and _is_dashboard(project_map[pid]) and not s.done
         for pid, s in _active.items()
-        if pid in PROJECT_MAP
     )
 
 
@@ -145,7 +203,7 @@ def _is_dashboard(project: dict) -> bool:
 async def list_projects() -> list[dict]:
     history = _load_history()
     result = []
-    for p in PROJECTS:
+    for p in get_projects():
         git = get_git_info(p["path"])
         proj_history = history.get(p["id"], [])
         last_deploy = proj_history[0] if proj_history else None
@@ -169,7 +227,7 @@ async def list_projects() -> list[dict]:
 
 @app.post("/api/projects/{project_id}/deploy")
 async def start_deploy(project_id: str) -> dict:
-    project = PROJECT_MAP.get(project_id)
+    project = get_project_map().get(project_id)
     if not project:
         raise HTTPException(404, "Project not found")
 
@@ -218,14 +276,14 @@ async def stream_deploy(project_id: str) -> StreamingResponse:
 
 @app.get("/api/projects/{project_id}/history")
 async def get_history(project_id: str) -> list:
-    if project_id not in PROJECT_MAP:
+    if project_id not in get_project_map():
         raise HTTPException(404, "Project not found")
     return _load_history().get(project_id, [])
 
 
 @app.get("/api/projects/{project_id}/docker-logs")
 async def docker_logs(project_id: str) -> dict:
-    project = PROJECT_MAP.get(project_id)
+    project = get_project_map().get(project_id)
     if not project:
         raise HTTPException(404, "Project not found")
     try:
@@ -241,6 +299,101 @@ async def docker_logs(project_id: str) -> dict:
         output = f"ERROR: {exc}"
     return {"output": output}
 
+
+# ── Admin routes (project config management) ────────────────────────────────
+
+
+@app.post("/api/admin/login")
+async def admin_login(payload: dict, response: Response) -> dict:
+    if not ADMIN_PASSWORD:
+        raise HTTPException(500, "ADMIN_PASSWORD is not configured on the server")
+    password = str(payload.get("password", ""))
+    if not secrets.compare_digest(password, ADMIN_PASSWORD):
+        raise HTTPException(401, "Incorrect password")
+    token = _new_session()
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        httponly=True,
+        samesite="lax",
+        max_age=SESSION_TTL,
+    )
+    return {"ok": True}
+
+
+@app.post("/api/admin/logout")
+async def admin_logout(request: Request, response: Response) -> dict:
+    token = request.cookies.get(SESSION_COOKIE)
+    if token:
+        _sessions.pop(token, None)
+    response.delete_cookie(SESSION_COOKIE)
+    return {"ok": True}
+
+
+@app.get("/api/admin/session")
+async def admin_session(request: Request) -> dict:
+    return {"authenticated": _valid_session(request.cookies.get(SESSION_COOKIE))}
+
+
+@app.get("/api/admin/projects", dependencies=[Depends(require_admin)])
+async def admin_list_projects() -> list[dict]:
+    return get_projects()
+
+
+@app.post("/api/admin/projects", dependencies=[Depends(require_admin)])
+async def admin_create_project(payload: dict) -> dict:
+    name = str(payload.get("name", "")).strip()
+    path = str(payload.get("path", "")).strip()
+    script = str(payload.get("script", "./rebuild.sh")).strip() or "./rebuild.sh"
+    if not name or not path:
+        raise HTTPException(400, "name and path are required")
+
+    projects = _load_config()
+    if any(p["name"].strip().lower() == name.lower() for p in projects):
+        raise HTTPException(409, "A project with this name already exists")
+
+    project = {"id": secrets.token_hex(4), "name": name, "path": path, "script": script}
+    projects.append(project)
+    _save_config(projects)
+    return project
+
+
+@app.put("/api/admin/projects/{project_id}", dependencies=[Depends(require_admin)])
+async def admin_update_project(project_id: str, payload: dict) -> dict:
+    projects = _load_config()
+    project = next((p for p in projects if p["id"] == project_id), None)
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    name = str(payload.get("name", project["name"])).strip()
+    path = str(payload.get("path", project["path"])).strip()
+    script = str(payload.get("script", project["script"])).strip() or "./rebuild.sh"
+    if not name or not path:
+        raise HTTPException(400, "name and path are required")
+    if any(
+        p["id"] != project_id and p["name"].strip().lower() == name.lower()
+        for p in projects
+    ):
+        raise HTTPException(409, "A project with this name already exists")
+
+    project["name"] = name
+    project["path"] = path
+    project["script"] = script
+    _save_config(projects)
+    return project
+
+
+@app.delete("/api/admin/projects/{project_id}", dependencies=[Depends(require_admin)])
+async def admin_delete_project(project_id: str) -> dict:
+    projects = _load_config()
+    filtered = [p for p in projects if p["id"] != project_id]
+    if len(filtered) == len(projects):
+        raise HTTPException(404, "Project not found")
+    _save_config(filtered)
+    return {"ok": True}
+
+
+# ── Deploy runner ──────────────────────────────────────────────────────────
 
 
 async def _run_deploy(project_id: str, project: dict, state: DeployState) -> None:

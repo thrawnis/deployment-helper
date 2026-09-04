@@ -40,6 +40,7 @@
       justify-content: space-between;
     }
     .header-left { display: flex; align-items: center; gap: 0.625rem; }
+    .header-right { display: flex; align-items: center; gap: 0.5rem; }
     .header-dot {
       width: 8px; height: 8px; border-radius: 50%;
       background: var(--teal);
@@ -230,6 +231,65 @@
     .toast.err { border-color: rgba(239,68,68,0.4); color: var(--red); }
     @keyframes slide-in { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
 
+    /* ── Admin modal ────────────────────────────────────────────────── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(2,4,10,0.7);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200; padding: 1rem;
+    }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 0.75rem; width: 100%; max-width: 540px;
+      max-height: 88vh; overflow-y: auto;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--surface);
+    }
+    .modal-header h2 { font-size: 1rem; font-weight: 600; color: var(--teal-bright); }
+    .modal-body { padding: 1.25rem; }
+
+    .form-group { margin-bottom: 0.75rem; }
+    .form-group label {
+      display: block; font-size: 0.75rem; color: var(--muted); margin-bottom: 0.3rem;
+    }
+    .form-group input {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 0.4rem; padding: 0.5rem 0.7rem;
+      font-size: 0.85rem; font-family: inherit;
+    }
+    .form-group input:focus { outline: none; border-color: var(--teal); }
+
+    .btn-primary {
+      background: var(--teal); color: #fff; border: none; border-radius: 0.4rem;
+      padding: 0.5rem 1.1rem; font-size: 0.85rem; font-weight: 500; cursor: pointer;
+    }
+    .btn-primary:hover { background: var(--teal-bright); }
+    .btn-secondary {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      border-radius: 0.4rem; padding: 0.5rem 1rem; font-size: 0.85rem; cursor: pointer;
+    }
+    .btn-secondary:hover { color: var(--text); border-color: var(--teal); }
+    .btn-danger { color: var(--red); border-color: rgba(239,68,68,0.4); }
+    .btn-danger:hover { background: rgba(239,68,68,0.1); color: var(--red); border-color: var(--red); }
+
+    .admin-project-row {
+      padding: 0.85rem; border: 1px solid var(--border); border-radius: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+    .admin-section-title {
+      font-size: 0.8rem; color: var(--teal-bright); font-weight: 600;
+      margin: 1.25rem 0 0.6rem; padding-top: 1rem; border-top: 1px solid var(--border);
+    }
+    .row-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
+    .modal-footer {
+      display: flex; justify-content: space-between; margin-top: 1.25rem;
+      padding-top: 1rem; border-top: 1px solid var(--border);
+    }
+
     @media (max-width: 500px) {
       main { padding: 1rem; }
       .grid { grid-template-columns: 1fr; }
@@ -243,7 +303,10 @@
     <div class="header-dot"></div>
     <h1>Deployment Dashboard</h1>
   </div>
-  <button class="refresh-btn" onclick="loadProjects()">↻ Refresh</button>
+  <div class="header-right">
+    <button class="refresh-btn" onclick="loadProjects()">↻ Refresh</button>
+    <button class="refresh-btn" id="admin-btn" title="Manage projects">⚙ Manage</button>
+  </div>
 </header>
 
 <main>
@@ -251,6 +314,16 @@
 </main>
 
 <div class="toast-container" id="toasts"></div>
+
+<div class="modal-overlay" id="admin-overlay" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="admin-modal-title">Admin Login</h2>
+      <button class="log-close" id="admin-close">✕</button>
+    </div>
+    <div class="modal-body" id="admin-body"></div>
+  </div>
+</div>
 
 <script>
 // ── SVG icons ──────────────────────────────────────────────────────────────
@@ -305,13 +378,6 @@ window.addEventListener('beforeunload', e => {
   }
 });
 
-window.addEventListener('beforeunload', e => {
-  if (Object.keys(streams).length > 0) {
-    e.preventDefault();
-    e.returnValue = 'A deploy is in progress. Are you sure you want to leave?';
-  }
-});
-
 // ── API ────────────────────────────────────────────────────────────────────
 async function api(method, path) {
   const r = await fetch(path, { method });
@@ -320,6 +386,25 @@ async function api(method, path) {
     throw new Error(body.detail || `HTTP ${r.status}`);
   }
   return r.json();
+}
+
+async function apiBody(method, path, body) {
+  const r = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const b = await r.json().catch(()=>({}));
+    throw new Error(b.detail || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : s;
+  return d.innerHTML;
 }
 
 // ── Render ─────────────────────────────────────────────────────────────────
@@ -636,10 +721,7 @@ async function loadProjects(retries = 5, delay = 2000) {
       root.className = 'page-state';
       root.innerHTML = `
         <p>No projects configured.</p>
-        <p>Add entries to your <code>.env</code> file:</p>
-        <p><code>PROJECT_1_NAME=My App</code></p>
-        <p><code>PROJECT_1_PATH=/home/user/my-app</code></p>
-        <p><code>PROJECT_1_SCRIPT=./rebuild.sh</code></p>`;
+        <p>Click <strong>⚙ Manage</strong> above to add one.</p>`;
       return;
     }
 
@@ -663,6 +745,181 @@ async function loadProjects(retries = 5, delay = 2000) {
       }
     }
   }
+}
+
+// ── Admin panel ──────────────────────────────────────────────────────────────
+const adminOverlay = document.getElementById('admin-overlay');
+const adminBody    = document.getElementById('admin-body');
+const adminTitle   = document.getElementById('admin-modal-title');
+
+document.getElementById('admin-btn').onclick = openAdmin;
+document.getElementById('admin-close').onclick = closeAdmin;
+adminOverlay.addEventListener('click', e => { if (e.target === adminOverlay) closeAdmin(); });
+
+function closeAdmin() { adminOverlay.hidden = true; }
+
+async function openAdmin() {
+  adminOverlay.hidden = false;
+  try {
+    const { authenticated } = await api('GET', '/api/admin/session');
+    if (authenticated) renderAdminEditor();
+    else renderAdminLogin();
+  } catch (err) {
+    renderAdminLogin();
+  }
+}
+
+function renderAdminLogin() {
+  adminTitle.textContent = 'Admin Login';
+  adminBody.innerHTML = '';
+
+  const form = document.createElement('form');
+  form.innerHTML = `
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="admin-password" autocomplete="current-password" autofocus />
+    </div>`;
+
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex; justify-content:flex-end; margin-top:1rem;';
+  const submitBtn = document.createElement('button');
+  submitBtn.type = 'submit';
+  submitBtn.className = 'btn-primary';
+  submitBtn.textContent = 'Log in';
+  actions.appendChild(submitBtn);
+  form.appendChild(actions);
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const password = document.getElementById('admin-password').value;
+    try {
+      await apiBody('POST', '/api/admin/login', { password });
+      renderAdminEditor();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  };
+
+  adminBody.appendChild(form);
+}
+
+async function renderAdminEditor() {
+  adminTitle.textContent = 'Manage Projects';
+  adminBody.innerHTML = '<p style="color:var(--muted); font-size:0.85rem;">Loading…</p>';
+
+  let projects;
+  try {
+    projects = await api('GET', '/api/admin/projects');
+  } catch (err) {
+    renderAdminLogin();
+    return;
+  }
+
+  adminBody.innerHTML = '';
+
+  if (!projects.length) {
+    const p = document.createElement('p');
+    p.style.cssText = 'color:var(--muted); font-size:0.85rem;';
+    p.textContent = 'No projects configured yet.';
+    adminBody.appendChild(p);
+  } else {
+    projects.forEach(p => adminBody.appendChild(adminProjectRow(p)));
+  }
+
+  const addTitle = document.createElement('div');
+  addTitle.className = 'admin-section-title';
+  addTitle.textContent = 'Add Project';
+  adminBody.appendChild(addTitle);
+  adminBody.appendChild(adminProjectForm(null));
+
+  const footer = document.createElement('div');
+  footer.className = 'modal-footer';
+  const logoutBtn = document.createElement('button');
+  logoutBtn.className = 'btn-secondary';
+  logoutBtn.textContent = 'Log out';
+  logoutBtn.onclick = async () => {
+    try { await api('POST', '/api/admin/logout'); } catch (_) {}
+    renderAdminLogin();
+  };
+  footer.appendChild(logoutBtn);
+  adminBody.appendChild(footer);
+}
+
+function adminProjectRow(project) {
+  const row = document.createElement('div');
+  row.className = 'admin-project-row';
+  row.appendChild(adminProjectForm(project));
+  return row;
+}
+
+function adminProjectForm(project) {
+  const isEdit = !!project;
+  const form = document.createElement('form');
+  form.innerHTML = `
+    <div class="form-group">
+      <label>Name</label>
+      <input name="name" value="${isEdit ? escapeHtml(project.name) : ''}" required />
+    </div>
+    <div class="form-group">
+      <label>Path</label>
+      <input name="path" value="${isEdit ? escapeHtml(project.path) : ''}" required />
+    </div>
+    <div class="form-group">
+      <label>Script</label>
+      <input name="script" value="${isEdit ? escapeHtml(project.script) : './rebuild.sh'}" />
+    </div>`;
+
+  const actions = document.createElement('div');
+  actions.className = 'row-actions';
+
+  if (isEdit) {
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn-secondary btn-danger';
+    delBtn.textContent = 'Delete';
+    delBtn.onclick = async () => {
+      if (!confirm(`Delete "${project.name}"? This does not remove any deploy history.`)) return;
+      try {
+        await api('DELETE', `/api/admin/projects/${project.id}`);
+        renderAdminEditor();
+        loadProjects();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    };
+    actions.appendChild(delBtn);
+  }
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'submit';
+  saveBtn.className = 'btn-primary';
+  saveBtn.textContent = isEdit ? 'Save' : 'Add project';
+  actions.appendChild(saveBtn);
+
+  form.appendChild(actions);
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const body = {
+      name: (fd.get('name') || '').trim(),
+      path: (fd.get('path') || '').trim(),
+      script: (fd.get('script') || './rebuild.sh').trim(),
+    };
+    try {
+      if (isEdit) {
+        await apiBody('PUT', `/api/admin/projects/${project.id}`, body);
+      } else {
+        await apiBody('POST', '/api/admin/projects', body);
+      }
+      renderAdminEditor();
+      loadProjects();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  };
+
+  return form;
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
