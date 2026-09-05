@@ -231,27 +231,14 @@
     .toast.err { border-color: rgba(239,68,68,0.4); color: var(--red); }
     @keyframes slide-in { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
 
-    /* ── Admin modal ────────────────────────────────────────────────── */
-    .modal-overlay {
-      position: fixed; inset: 0;
-      background: rgba(2,4,10,0.7);
-      display: flex; align-items: center; justify-content: center;
-      z-index: 200; padding: 1rem;
+    /* ── Admin page ─────────────────────────────────────────────────── */
+    .admin-page-header {
+      display: flex; align-items: center; gap: 1rem;
+      margin-bottom: 1.5rem; padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
     }
-    .modal-overlay[hidden] { display: none; }
-    .modal {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 0.75rem; width: 100%; max-width: 540px;
-      max-height: 88vh; overflow-y: auto;
-      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
-    }
-    .modal-header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
-      position: sticky; top: 0; background: var(--surface);
-    }
-    .modal-header h2 { font-size: 1rem; font-weight: 600; color: var(--teal-bright); }
-    .modal-body { padding: 1.25rem; }
+    .admin-page-header h2 { font-size: 1.125rem; font-weight: 600; color: var(--teal-bright); }
+    #admin-body { max-width: 560px; }
 
     .form-group { margin-bottom: 0.75rem; }
     .form-group label {
@@ -286,7 +273,7 @@
       margin: 1.25rem 0 0.6rem; padding-top: 1rem; border-top: 1px solid var(--border);
     }
     .row-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
-    .modal-footer {
+    .admin-footer {
       display: flex; justify-content: space-between; margin-top: 1.25rem;
       padding-top: 1rem; border-top: 1px solid var(--border);
     }
@@ -304,27 +291,27 @@
     <div class="header-dot"></div>
     <h1>Deployment Dashboard</h1>
   </div>
-  <div class="header-right">
+  <div class="header-right" id="dashboard-header-actions">
     <button class="refresh-btn" onclick="loadProjects()">↻ Refresh</button>
     <button class="refresh-btn" id="admin-btn" title="Manage projects">⚙ Manage</button>
   </div>
 </header>
 
 <main>
-  <div id="root" class="page-state"><p>Loading…</p></div>
+  <div id="dashboard-view">
+    <div id="root" class="page-state"><p>Loading…</p></div>
+  </div>
+
+  <div id="admin-view" hidden>
+    <div class="admin-page-header">
+      <button class="refresh-btn" id="admin-back-btn">← Back to Dashboard</button>
+      <h2 id="admin-page-title">Admin Login</h2>
+    </div>
+    <div id="admin-body"></div>
+  </div>
 </main>
 
 <div class="toast-container" id="toasts"></div>
-
-<div class="modal-overlay" id="admin-overlay" hidden>
-  <div class="modal">
-    <div class="modal-header">
-      <h2 id="admin-modal-title">Admin Login</h2>
-      <button class="log-close" id="admin-close">✕</button>
-    </div>
-    <div class="modal-body" id="admin-body"></div>
-  </div>
-</div>
 
 <script>
 // ── SVG icons ──────────────────────────────────────────────────────────────
@@ -748,19 +735,24 @@ async function loadProjects(retries = 5, delay = 2000) {
   }
 }
 
-// ── Admin panel ──────────────────────────────────────────────────────────────
-const adminOverlay = document.getElementById('admin-overlay');
-const adminBody    = document.getElementById('admin-body');
-const adminTitle   = document.getElementById('admin-modal-title');
+// ── Admin panel (full page, routed via #admin hash) ──────────────────────────
+const dashboardView = document.getElementById('dashboard-view');
+const adminView      = document.getElementById('admin-view');
+const adminBody       = document.getElementById('admin-body');
+const adminTitle      = document.getElementById('admin-page-title');
 
-document.getElementById('admin-btn').onclick = openAdmin;
-document.getElementById('admin-close').onclick = closeAdmin;
-adminOverlay.addEventListener('click', e => { if (e.target === adminOverlay) closeAdmin(); });
+document.getElementById('admin-btn').onclick = () => { location.hash = '#admin'; };
+document.getElementById('admin-back-btn').onclick = () => { location.hash = ''; };
+window.addEventListener('hashchange', route);
 
-function closeAdmin() { adminOverlay.hidden = true; }
+function route() {
+  const isAdmin = location.hash === '#admin';
+  dashboardView.hidden = isAdmin;
+  adminView.hidden = !isAdmin;
+  if (isAdmin) openAdmin();
+}
 
 async function openAdmin() {
-  adminOverlay.hidden = false;
   try {
     const { authenticated } = await api('GET', '/api/admin/session');
     if (authenticated) renderAdminEditor();
@@ -837,7 +829,7 @@ async function renderAdminEditor() {
   adminBody.appendChild(addForm);
 
   const footer = document.createElement('div');
-  footer.className = 'modal-footer';
+  footer.className = 'admin-footer';
   const logoutBtn = document.createElement('button');
   logoutBtn.className = 'btn-secondary';
   logoutBtn.textContent = 'Log out';
@@ -951,6 +943,7 @@ function adminProjectForm(project) {
 
 // ── Init ───────────────────────────────────────────────────────────────────
 loadProjects();
+route();
 setInterval(() => {
   const anyLogOpen = document.querySelector('.log-panel.open') !== null;
   if (Object.keys(streams).length === 0 && !anyLogOpen) loadProjects();
