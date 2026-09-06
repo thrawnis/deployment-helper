@@ -238,7 +238,20 @@
       border-bottom: 1px solid var(--border);
     }
     .admin-page-header h2 { font-size: 1.125rem; font-weight: 600; color: var(--teal-bright); }
-    #admin-body { max-width: 560px; }
+
+    .admin-projects-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+      margin-bottom: 0.5rem;
+    }
+    @media (min-width: 700px) {
+      .admin-projects-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (min-width: 1040px) {
+      .admin-projects-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    .admin-narrow { max-width: 560px; }
 
     .form-group { margin-bottom: 0.75rem; }
     .form-group label {
@@ -266,7 +279,7 @@
 
     .admin-project-row {
       padding: 0.85rem; border: 1px solid var(--border); border-radius: 0.5rem;
-      margin-bottom: 0.75rem;
+      display: flex; flex-direction: column;
     }
     .admin-section-title {
       font-size: 0.8rem; color: var(--teal-bright); font-weight: 600;
@@ -766,6 +779,9 @@ function renderAdminLogin() {
   adminTitle.textContent = 'Admin Login';
   adminBody.innerHTML = '';
 
+  const narrow = document.createElement('div');
+  narrow.className = 'admin-narrow';
+
   const form = document.createElement('form');
   form.innerHTML = `
     <div class="form-group">
@@ -781,6 +797,8 @@ function renderAdminLogin() {
   submitBtn.textContent = 'Log in';
   actions.appendChild(submitBtn);
   form.appendChild(actions);
+  narrow.appendChild(form);
+  adminBody.appendChild(narrow);
 
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -792,8 +810,6 @@ function renderAdminLogin() {
       toast(err.message, true);
     }
   };
-
-  adminBody.appendChild(form);
 }
 
 async function renderAdminEditor() {
@@ -816,17 +832,23 @@ async function renderAdminEditor() {
     p.textContent = 'No projects configured yet.';
     adminBody.appendChild(p);
   } else {
-    projects.forEach(p => adminBody.appendChild(adminProjectRow(p)));
+    const grid = document.createElement('div');
+    grid.className = 'admin-projects-grid';
+    projects.forEach(p => grid.appendChild(adminProjectRow(p)));
+    adminBody.appendChild(grid);
   }
+
+  const narrow = document.createElement('div');
+  narrow.className = 'admin-narrow';
 
   const addTitle = document.createElement('div');
   addTitle.className = 'admin-section-title';
   addTitle.id = 'admin-add-title';
   addTitle.textContent = 'Add Project';
-  adminBody.appendChild(addTitle);
+  narrow.appendChild(addTitle);
   const addForm = adminProjectForm(null);
   addForm.id = 'admin-add-form';
-  adminBody.appendChild(addForm);
+  narrow.appendChild(addForm);
 
   const footer = document.createElement('div');
   footer.className = 'admin-footer';
@@ -838,7 +860,9 @@ async function renderAdminEditor() {
     renderAdminLogin();
   };
   footer.appendChild(logoutBtn);
-  adminBody.appendChild(footer);
+  narrow.appendChild(footer);
+
+  adminBody.appendChild(narrow);
 }
 
 function cloneProjectIntoAddForm(project) {
