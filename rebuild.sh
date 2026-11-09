@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# rebuild.sh — Pull latest main branch and redeploy the Deployment Dashboard.
-# Usage: ./rebuild.sh [--pull-base-images]
+# rebuild.sh — Pull latest main branch and redeploy the Deployment Dashboard,
+# but only if there's actually something new to deploy.
+# Usage: ./rebuild.sh [--pull-base-images] [--force]
 #
 # Builds the image directly with `docker buildx build` rather than
 # `docker compose build` — Compose's buildx plugin detection is unreliable
@@ -11,21 +12,43 @@
 # Pass --pull-base-images occasionally (e.g. monthly) to re-check the base
 # image against the registry. Omitted by default — it's pure network latency
 # on every rebuild for essentially zero benefit day-to-day.
+#
+# Pass --force to rebuild and restart even if the git pull brought in no new
+# commits — useful after changing something outside git (e.g. .env).
 
 set -euo pipefail
 
 PULL_BASE_IMAGES=false
+FORCE=false
 for arg in "$@"; do
-  [ "$arg" = "--pull-base-images" ] && PULL_BASE_IMAGES=true
+  case "$arg" in
+    --pull-base-images) PULL_BASE_IMAGES=true ;;
+    --force) FORCE=true ;;
+  esac
 done
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 IMAGE="deployment-helper-dashboard:latest"
 
-echo "==> Switching to main branch and pulling latest..."
 cd "$REPO_DIR"
+
+echo "==> Switching to main branch and pulling latest..."
 git checkout main
+BEFORE_SHA="$(git rev-parse HEAD)"
 git pull origin main
+AFTER_SHA="$(git rev-parse HEAD)"
+
+if [ "$BEFORE_SHA" = "$AFTER_SHA" ] && [ "$FORCE" = false ]; then
+  echo "==> No new commits (still at ${AFTER_SHA:0:7}). Nothing to do — skipping build and restart."
+  echo "    Pass --force to rebuild and restart anyway."
+  exit 0
+fi
+
+if [ "$BEFORE_SHA" = "$AFTER_SHA" ]; then
+  echo "==> No new commits, but --force was given — rebuilding anyway."
+else
+  echo "==> Code changed (${BEFORE_SHA:0:7} -> ${AFTER_SHA:0:7})."
+fi
 
 echo "==> Building image with docker buildx"
 BUILDX_ARGS=(build --tag "$IMAGE" --load "$REPO_DIR")
