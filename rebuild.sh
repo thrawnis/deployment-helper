@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rebuild.sh — Pull latest dev branch and redeploy the Deployment Dashboard.
+# rebuild.sh — Pull latest main branch and redeploy the Deployment Dashboard.
 # Usage: ./rebuild.sh [--pull-base-images]
 #
 # Builds the image directly with `docker buildx build` rather than
@@ -22,10 +22,10 @@ done
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 IMAGE="deployment-helper-dashboard:latest"
 
-echo "==> Switching to dev branch and pulling latest..."
+echo "==> Switching to main branch and pulling latest..."
 cd "$REPO_DIR"
-git checkout dev
-git pull origin dev
+git checkout main
+git pull origin main
 
 echo "==> Building image with docker buildx"
 BUILDX_ARGS=(build --tag "$IMAGE" --load "$REPO_DIR")
