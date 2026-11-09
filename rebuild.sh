@@ -15,6 +15,11 @@
 #
 # Pass --force to rebuild and restart even if the git pull brought in no new
 # commits — useful after changing something outside git (e.g. .env).
+#
+# Even with no new commits, this also force-rebuilds automatically if the
+# currently *running* container isn't actually on the latest commit — e.g.
+# a previous restart silently failed and left stale code running. This is
+# detected via a git_sha label baked into the image at build time.
 
 set -euo pipefail
 
@@ -38,10 +43,24 @@ BEFORE_SHA="$(git rev-parse HEAD)"
 git pull origin main
 AFTER_SHA="$(git rev-parse HEAD)"
 
+# What commit is the currently running container actually built from?
+RUNNING_SHA=""
+RUNNING_CID="$(docker compose ps -q dashboard 2>/dev/null || true)"
+if [ -n "$RUNNING_CID" ]; then
+  RUNNING_IMAGE_ID="$(docker inspect -f '{{.Image}}' "$RUNNING_CID" 2>/dev/null || true)"
+  if [ -n "$RUNNING_IMAGE_ID" ]; then
+    RUNNING_SHA="$(docker image inspect -f '{{ index .Config.Labels "git_sha" }}' "$RUNNING_IMAGE_ID" 2>/dev/null || true)"
+  fi
+fi
+
 if [ "$BEFORE_SHA" = "$AFTER_SHA" ] && [ "$FORCE" = false ]; then
-  echo "==> No new commits (still at ${AFTER_SHA:0:7}). Nothing to do — skipping build and restart."
-  echo "    Pass --force to rebuild and restart anyway."
-  exit 0
+  if [ -z "$RUNNING_SHA" ] || [ "$RUNNING_SHA" = "$AFTER_SHA" ]; then
+    echo "==> No new commits (still at ${AFTER_SHA:0:7}). Nothing to do — skipping build and restart."
+    echo "    Pass --force to rebuild and restart anyway."
+    exit 0
+  fi
+  echo "==> No new commits, but the running container is on ${RUNNING_SHA:0:7} instead of ${AFTER_SHA:0:7}."
+  echo "    Forcing a rebuild to bring it in sync."
 fi
 
 if [ "$BEFORE_SHA" = "$AFTER_SHA" ]; then
@@ -51,7 +70,7 @@ else
 fi
 
 echo "==> Building image with docker buildx"
-BUILDX_ARGS=(build --tag "$IMAGE" --load "$REPO_DIR")
+BUILDX_ARGS=(build --tag "$IMAGE" --build-arg "GIT_SHA=$AFTER_SHA" --load "$REPO_DIR")
 if [ "$PULL_BASE_IMAGES" = true ]; then
   echo "    (--pull-base-images: re-checking base image against registry)"
   BUILDX_ARGS+=(--pull)
