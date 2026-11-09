@@ -12,6 +12,7 @@ A self-hosted web dashboard for managing and deploying Dockerized projects on a 
 - **Safe self-redeploy** — redeploying the dashboard itself builds the new image first, then hands the container swap off to the Docker host so the process survives the container going down. The UI polls for the service coming back and reloads automatically
 - **Deploy guards** — only one deploy runs at a time per project; the Deployment Helper blocks all other deploys while it's redeploying, and vice versa
 - **Leave warning** — the browser prompts before closing/navigating away during an active deploy
+- **Daily schedule** — optionally redeploy projects automatically at a single global time each day, one after another. Every project is excluded by default; opt individual projects in from the admin panel. Deployment Helper runs first if it's included, and the schedule resumes correctly even if its own redeploy restarts the container mid-run
 
 ## Tech Stack
 
@@ -82,6 +83,14 @@ PROJECT_N_SCRIPT=./rebuild.sh
 ## Data & Logs
 
 Deploy history is stored in `./data/history.json` (a bind-mounted folder alongside the project). This file is gitignored and persists across container restarts.
+
+## Daily Schedule
+
+From the admin panel (**⚙ Manage**), set a single run time (server's local time) under **Daily Schedule**, then check **Include in daily schedule** on each project you want deployed automatically. All other projects are left alone.
+
+At the configured time, every day, the app deploys each opted-in project sequentially — Deployment Helper first if it's included, then the rest alphabetically. Progress is persisted to `./data/schedule_run.json`, so if deploying Deployment Helper restarts the container partway through, the remaining projects still run once it comes back up. Activity is logged to `./data/schedule.log`.
+
+This runs entirely inside the app — no host cron job is needed.
 
 ## Security
 

@@ -8,7 +8,7 @@ import secrets
 import subprocess
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -24,9 +24,15 @@ DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 HISTORY_FILE = DATA_DIR / "history.json"
 CONFIG_FILE = DATA_DIR / "projects.json"
+SCHEDULE_FILE = DATA_DIR / "schedule.json"
+SCHEDULE_RUN_FILE = DATA_DIR / "schedule_run.json"
+SCHEDULE_TRIGGER_FILE = DATA_DIR / "schedule_last_trigger.json"
+SCHEDULE_LOG_FILE = DATA_DIR / "schedule.log"
 MAX_HISTORY = 5
 DEPLOY_STATE_TTL = 120  # seconds to keep finished deploy state in memory
 DASHBOARD_NAME = "deployment helper"
+DEFAULT_SCHEDULE_TIME = "03:00"
+SCHEDULER_POLL_INTERVAL = 30  # seconds
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 SESSION_COOKIE = "admin_session"
@@ -46,6 +52,7 @@ def _seed_config_from_env() -> list[dict]:
                 "name": name,
                 "path": os.getenv(f"PROJECT_{i}_PATH", ""),
                 "script": os.getenv(f"PROJECT_{i}_SCRIPT", "./rebuild.sh"),
+                "scheduled": False,
             }
         )
         i += 1
@@ -58,9 +65,12 @@ def _load_config() -> list[dict]:
         _save_config(seeded)
         return seeded
     try:
-        return json.loads(CONFIG_FILE.read_text())
+        projects = json.loads(CONFIG_FILE.read_text())
     except json.JSONDecodeError:
         return []
+    for p in projects:
+        p.setdefault("scheduled", False)
+    return projects
 
 
 def _save_config(projects: list[dict]) -> None:
@@ -105,6 +115,63 @@ def _load_history() -> dict:
 
 def _save_history(h: dict) -> None:
     HISTORY_FILE.write_text(json.dumps(h, indent=2))
+
+
+# ── Daily schedule persistence ──────────────────────────────────────────────
+
+
+def _parse_hhmm(value: str) -> tuple[int, int] | tuple[None, None]:
+    try:
+        hh_s, mm_s = value.strip().split(":")
+        hh, mm = int(hh_s), int(mm_s)
+        if 0 <= hh <= 23 and 0 <= mm <= 59:
+            return hh, mm
+    except Exception:
+        pass
+    return None, None
+
+
+def _load_schedule() -> dict:
+    try:
+        return json.loads(SCHEDULE_FILE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"time": DEFAULT_SCHEDULE_TIME}
+
+
+def _save_schedule(data: dict) -> None:
+    SCHEDULE_FILE.write_text(json.dumps(data, indent=2))
+
+
+def _load_schedule_run() -> dict | None:
+    try:
+        return json.loads(SCHEDULE_RUN_FILE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def _save_schedule_run(data: dict) -> None:
+    SCHEDULE_RUN_FILE.write_text(json.dumps(data, indent=2))
+
+
+def _clear_schedule_run() -> None:
+    SCHEDULE_RUN_FILE.unlink(missing_ok=True)
+
+
+def _load_last_trigger_date() -> str | None:
+    try:
+        return json.loads(SCHEDULE_TRIGGER_FILE.read_text()).get("date")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def _save_last_trigger_date(value: str) -> None:
+    SCHEDULE_TRIGGER_FILE.write_text(json.dumps({"date": value}))
+
+
+def _schedule_log(msg: str) -> None:
+    line = f"[{datetime.now().isoformat(timespec='seconds')}] {msg}\n"
+    with SCHEDULE_LOG_FILE.open("a") as f:
+        f.write(line)
 
 
 # ── Active deploy state ────────────────────────────────────────────────────
@@ -345,6 +412,7 @@ async def admin_create_project(payload: dict) -> dict:
     name = str(payload.get("name", "")).strip()
     path = str(payload.get("path", "")).strip()
     script = str(payload.get("script", "./rebuild.sh")).strip() or "./rebuild.sh"
+    scheduled = bool(payload.get("scheduled", False))
     if not name or not path:
         raise HTTPException(400, "name and path are required")
 
@@ -352,7 +420,13 @@ async def admin_create_project(payload: dict) -> dict:
     if any(p["name"].strip().lower() == name.lower() for p in projects):
         raise HTTPException(409, "A project with this name already exists")
 
-    project = {"id": secrets.token_hex(4), "name": name, "path": path, "script": script}
+    project = {
+        "id": secrets.token_hex(4),
+        "name": name,
+        "path": path,
+        "script": script,
+        "scheduled": scheduled,
+    }
     projects.append(project)
     _save_config(projects)
     return project
@@ -368,6 +442,7 @@ async def admin_update_project(project_id: str, payload: dict) -> dict:
     name = str(payload.get("name", project["name"])).strip()
     path = str(payload.get("path", project["path"])).strip()
     script = str(payload.get("script", project["script"])).strip() or "./rebuild.sh"
+    scheduled = bool(payload.get("scheduled", project.get("scheduled", False)))
     if not name or not path:
         raise HTTPException(400, "name and path are required")
     if any(
@@ -379,6 +454,7 @@ async def admin_update_project(project_id: str, payload: dict) -> dict:
     project["name"] = name
     project["path"] = path
     project["script"] = script
+    project["scheduled"] = scheduled
     _save_config(projects)
     return project
 
@@ -391,6 +467,22 @@ async def admin_delete_project(project_id: str) -> dict:
         raise HTTPException(404, "Project not found")
     _save_config(filtered)
     return {"ok": True}
+
+
+@app.get("/api/admin/schedule", dependencies=[Depends(require_admin)])
+async def admin_get_schedule() -> dict:
+    return _load_schedule()
+
+
+@app.put("/api/admin/schedule", dependencies=[Depends(require_admin)])
+async def admin_set_schedule(payload: dict) -> dict:
+    time_str = str(payload.get("time", "")).strip()
+    hh, mm = _parse_hhmm(time_str)
+    if hh is None:
+        raise HTTPException(400, "time must be in HH:MM 24-hour format")
+    data = {"time": f"{hh:02d}:{mm:02d}"}
+    _save_schedule(data)
+    return data
 
 
 # ── Deploy runner ──────────────────────────────────────────────────────────
@@ -442,3 +534,91 @@ async def _expire_state(project_id: str, delay: int) -> None:
     state = _active.get(project_id)
     if state and state.done:
         del _active[project_id]
+
+
+# ── Daily scheduler ──────────────────────────────────────────────────────────
+
+
+def _scheduled_project_ids() -> list[str]:
+    """Deployment Helper first (if included), then the rest alphabetically."""
+    projects = [p for p in get_projects() if p.get("scheduled")]
+    projects.sort(key=lambda p: (not _is_dashboard(p), p["name"].strip().lower()))
+    return [p["id"] for p in projects]
+
+
+async def _scheduled_deploy_one(project: dict) -> None:
+    pid, name = project["id"], project["name"]
+
+    existing = _active.get(pid)
+    if existing and not existing.done:
+        _schedule_log(f"Skipping {name}: a deploy is already in progress")
+        return
+    if _is_dashboard(project) and _any_other_deploy_active(pid):
+        _schedule_log(f"Skipping {name}: another deploy is in progress")
+        return
+    if not _is_dashboard(project) and _dashboard_deploy_active():
+        _schedule_log(f"Skipping {name}: Deployment Helper is redeploying")
+        return
+
+    state = DeployState(str(uuid.uuid4())[:8])
+    _active[pid] = state
+    _schedule_log(f"Starting: {name}")
+    await _run_deploy(pid, project, state)
+    _schedule_log(f"Finished: {name} (success={state.success})")
+
+
+async def _run_scheduled_deploys(project_ids: list[str]) -> None:
+    """Deploys the given projects one at a time, persisting progress so a
+    Deployment Helper restart mid-run can resume where it left off."""
+    remaining = list(project_ids)
+    today = date.today().isoformat()
+    _save_schedule_run({"date": today, "remaining_ids": remaining})
+    _schedule_log(f"=== Scheduled run started: {len(remaining)} project(s) ===")
+
+    while remaining:
+        pid = remaining[0]
+        project = get_project_map().get(pid)
+        if project:
+            await _scheduled_deploy_one(project)
+        remaining.pop(0)
+        _save_schedule_run({"date": today, "remaining_ids": remaining})
+
+    _clear_schedule_run()
+    _schedule_log("=== Scheduled run complete ===")
+
+
+async def _scheduler_loop() -> None:
+    while True:
+        await asyncio.sleep(SCHEDULER_POLL_INTERVAL)
+        try:
+            schedule = _load_schedule()
+            hh, mm = _parse_hhmm(schedule.get("time", DEFAULT_SCHEDULE_TIME))
+            if hh is None:
+                continue
+            now = datetime.now()
+            today_str = now.date().isoformat()
+            if now.hour == hh and now.minute == mm and _load_last_trigger_date() != today_str:
+                _save_last_trigger_date(today_str)
+                ids = _scheduled_project_ids()
+                if ids:
+                    asyncio.create_task(_run_scheduled_deploys(ids))
+                else:
+                    _schedule_log("Scheduled time reached but no projects are opted in — skipping")
+        except Exception as exc:
+            _schedule_log(f"Scheduler loop error: {exc}")
+
+
+@app.on_event("startup")
+async def _on_startup() -> None:
+    # Resume an interrupted scheduled run from earlier today — e.g. the
+    # Deployment Helper's own scheduled deploy restarted this container
+    # mid-run, so pick back up with whatever projects were left.
+    progress = _load_schedule_run()
+    if progress and progress.get("date") == date.today().isoformat() and progress.get("remaining_ids"):
+        remaining = progress["remaining_ids"]
+        _schedule_log(f"Resuming interrupted scheduled run: {len(remaining)} project(s) left")
+        asyncio.create_task(_run_scheduled_deploys(remaining))
+    else:
+        _clear_schedule_run()
+
+    asyncio.create_task(_scheduler_loop())
