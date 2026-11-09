@@ -36,13 +36,20 @@ fi
 docker buildx "${BUILDX_ARGS[@]}"
 
 echo "==> Handing restart off to Docker host..."
-# Spawn a lightweight helper container on the host that outlives this one.
-# It waits 3 seconds for this script to finish logging, then swaps the container.
+# Spawn a helper container that outlives this one to do the actual swap.
+# Use the image we just built (not a separate docker:cli pull) — it's
+# already verified to have docker-ce-cli + compose + buildx installed,
+# whereas docker:cli's bundled compose plugin has been unreliable and
+# fails silently since this container runs detached with no visible output.
+# Output is captured to data/restart.log so a failure here is diagnosable.
+RESTART_LOG="$REPO_DIR/data/restart.log"
+mkdir -p "$REPO_DIR/data"
 docker run --rm -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$REPO_DIR:$REPO_DIR" \
   -w "$REPO_DIR" \
-  docker:cli \
-  sh -c "sleep 3 && docker compose down && docker compose up -d --no-build"
+  --entrypoint sh \
+  "$IMAGE" \
+  -c "sleep 3 && { docker compose down && docker compose up -d --no-build; } > '$RESTART_LOG' 2>&1"
 
 echo "==> Restart scheduled. Container going down now..."

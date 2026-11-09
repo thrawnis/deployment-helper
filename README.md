@@ -24,19 +24,13 @@ A self-hosted web dashboard for managing and deploying Dockerized projects on a 
 
 ## Project Configuration
 
-Projects are configured via a `.env` file using numbered entries:
+Projects are managed from the web UI — click **⚙ Manage** in the header, log in with `ADMIN_PASSWORD`, and add/edit/delete projects (name, path, deploy script). Configuration is stored in `./data/projects.json`.
 
-```env
-PROJECT_1_NAME=My App
-PROJECT_1_PATH=/media/docker/my-app
-PROJECT_1_SCRIPT=./rebuild.sh
+No password is required to view the dashboard or run deploys — only to change project configuration.
 
-PROJECT_2_NAME=Other App
-PROJECT_2_PATH=/media/docker/other-app
-PROJECT_2_SCRIPT=./rebuild.sh
-```
+Projects are displayed alphabetically, with **Deployment Helper** always pinned last if present.
 
-Copy `.env.example` to `.env` and fill in your projects. Projects are displayed alphabetically, with **Deployment Helper** always pinned last if present.
+Copy `.env.example` to `.env` and set `ADMIN_PASSWORD`. The `PROJECT_N_*` vars in `.env.example` are legacy — they're only read once, the very first time the app starts with no `./data/projects.json` present, to seed the initial list.
 
 ## Setup
 
