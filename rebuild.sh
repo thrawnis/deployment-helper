@@ -37,10 +37,12 @@ IMAGE="deployment-helper-dashboard:latest"
 
 cd "$REPO_DIR"
 
-echo "==> Switching to main branch and pulling latest..."
+echo "==> Discarding local changes and pulling latest from main..."
+git fetch origin main
 git checkout main
 BEFORE_SHA="$(git rev-parse HEAD)"
-git pull origin main
+git reset --hard origin/main
+git clean -fd
 AFTER_SHA="$(git rev-parse HEAD)"
 
 # What commit is the currently running container actually built from?
