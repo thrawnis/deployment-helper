@@ -894,7 +894,7 @@ async function renderScheduleSection() {
 
   const desc = document.createElement('p');
   desc.style.cssText = 'color:var(--muted); font-size:0.8rem; margin-bottom:0.75rem;';
-  desc.textContent = 'Projects marked "Include in daily schedule" below will redeploy automatically at this time every day, one after another. Deployment Helper runs first if it\'s included. Every project is excluded by default.';
+  desc.textContent = 'Projects marked "Include in daily schedule" below will redeploy automatically at this time every day, one after another. Deployment Helper runs first if it\'s included. Every project is excluded by default. A summary email is sent (via SMTP settings in .env) once the run finishes.';
   wrap.appendChild(desc);
 
   let schedule;
@@ -912,7 +912,26 @@ async function renderScheduleSection() {
     </div>`;
 
   const actions = document.createElement('div');
-  actions.style.cssText = 'display:flex; justify-content:flex-end;';
+  actions.style.cssText = 'display:flex; justify-content:flex-end; gap:0.5rem;';
+  const testEmailBtn = document.createElement('button');
+  testEmailBtn.type = 'button';
+  testEmailBtn.className = 'btn-secondary';
+  testEmailBtn.textContent = 'Send test email';
+  testEmailBtn.onclick = async () => {
+    testEmailBtn.disabled = true;
+    const originalText = testEmailBtn.textContent;
+    testEmailBtn.textContent = 'Sending…';
+    try {
+      const result = await apiBody('POST', '/api/admin/schedule/test-email', {});
+      toast(`Test email sent to ${result.sent_to.join(', ')}`);
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      testEmailBtn.disabled = false;
+      testEmailBtn.textContent = originalText;
+    }
+  };
+  actions.appendChild(testEmailBtn);
   const saveBtn = document.createElement('button');
   saveBtn.type = 'submit';
   saveBtn.className = 'btn-primary';

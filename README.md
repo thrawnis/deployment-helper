@@ -93,6 +93,10 @@ At the configured time, every day, the app deploys each opted-in project sequent
 
 This runs entirely inside the app — no host cron job is needed.
 
+### Email report
+
+If `SMTP_HOST`, `SMTP_FROM`, and `SMTP_TO` are set in `.env`, a summary email is sent once the nightly run finishes — a simple HTML table with each app's name, whether it deployed successfully, and whether a container restart was actually detected (see **Restart verification** above). Skipped projects (e.g. blocked by a concurrent deploy) are included too. Use **Send test email** in the **Daily Schedule** section of the admin panel to verify your SMTP settings without waiting for the scheduled run.
+
 ## Security
 
 - Exposed via Cloudflare Tunnel + Cloudflare Access — no additional auth layer inside the app

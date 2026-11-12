@@ -5,10 +5,13 @@ import asyncio
 import json
 import os
 import secrets
+import smtplib
 import subprocess
 import time
 import uuid
 from datetime import date, datetime, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -37,6 +40,14 @@ SCHEDULER_POLL_INTERVAL = 30  # seconds
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 SESSION_COOKIE = "admin_session"
 SESSION_TTL = 8 * 3600  # 8 hours
+
+SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587") or 587)
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "").strip()
+SMTP_TO = [addr.strip() for addr in os.getenv("SMTP_TO", "").split(",") if addr.strip()]
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").strip().lower() not in ("false", "0", "no")
 
 # ── Project config (stored in DATA_DIR, editable via the admin UI) ─────────
 
@@ -172,6 +183,95 @@ def _schedule_log(msg: str) -> None:
     line = f"[{datetime.now().isoformat(timespec='seconds')}] {msg}\n"
     with SCHEDULE_LOG_FILE.open("a") as f:
         f.write(line)
+
+
+# ── Nightly schedule email report ───────────────────────────────────────────
+
+
+def _build_report_email(results: list[dict]) -> tuple[str, str]:
+    today = date.today().isoformat()
+    subject = f"Deployment Helper — nightly schedule report ({today})"
+
+    status_labels = {
+        "success": "✅ Success",
+        "failed": "❌ Failed",
+        "skipped": "⏭️ Skipped",
+    }
+    row_html = []
+    for r in results:
+        status = status_labels.get(r.get("status"), r.get("status", "unknown"))
+        restarted = r.get("container_restarted")
+        updated = "Yes" if restarted is True else "No" if restarted is False else "Unknown"
+        row_html.append(
+            "<tr>"
+            f"<td style='padding:6px 12px;border:1px solid #ccc;'>{r.get('name', '')}</td>"
+            f"<td style='padding:6px 12px;border:1px solid #ccc;'>{status}</td>"
+            f"<td style='padding:6px 12px;border:1px solid #ccc;'>{updated}</td>"
+            "</tr>"
+        )
+    table_body = "\n".join(row_html) or (
+        "<tr><td colspan='3' style='padding:6px 12px;'>No projects were scheduled.</td></tr>"
+    )
+
+    html = f"""\
+<html>
+<body style="font-family: -apple-system, Arial, sans-serif; color:#111;">
+  <h2 style="margin-bottom:0.25rem;">Nightly deploy schedule report</h2>
+  <p style="color:#555; margin-top:0;">{today}</p>
+  <table style="border-collapse: collapse; font-size: 14px;">
+    <thead>
+      <tr>
+        <th style="padding:6px 12px;border:1px solid #ccc; text-align:left; background:#f3f3f3;">App</th>
+        <th style="padding:6px 12px;border:1px solid #ccc; text-align:left; background:#f3f3f3;">Result</th>
+        <th style="padding:6px 12px;border:1px solid #ccc; text-align:left; background:#f3f3f3;">Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      {table_body}
+    </tbody>
+  </table>
+</body>
+</html>
+"""
+    return subject, html
+
+
+def _send_email_sync(subject: str, html_body: str) -> None:
+    if not SMTP_HOST or not SMTP_FROM or not SMTP_TO:
+        raise RuntimeError(
+            "SMTP is not configured — set SMTP_HOST, SMTP_FROM, and SMTP_TO in .env"
+        )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM
+    msg["To"] = ", ".join(SMTP_TO)
+    msg.attach(MIMEText(html_body, "html"))
+
+    if SMTP_PORT == 465:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+            if SMTP_USERNAME:
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM, SMTP_TO, msg.as_string())
+    else:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+            if SMTP_USE_TLS:
+                server.starttls()
+            if SMTP_USERNAME:
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM, SMTP_TO, msg.as_string())
+
+
+async def _send_schedule_report(results: list[dict]) -> None:
+    if not results:
+        _schedule_log("No projects were scheduled — skipping email report")
+        return
+    subject, html = _build_report_email(results)
+    try:
+        await asyncio.to_thread(_send_email_sync, subject, html)
+        _schedule_log(f"Email report sent to {', '.join(SMTP_TO)}")
+    except Exception as exc:
+        _schedule_log(f"Failed to send email report: {exc}")
 
 
 # ── Active deploy state ────────────────────────────────────────────────────
@@ -518,6 +618,21 @@ async def admin_set_schedule(payload: dict) -> dict:
     return data
 
 
+@app.post("/api/admin/schedule/test-email", dependencies=[Depends(require_admin)])
+async def admin_test_email() -> dict:
+    subject, html = _build_report_email(
+        [
+            {"name": "Example App", "status": "success", "container_restarted": True},
+            {"name": "Other App", "status": "failed", "container_restarted": False},
+        ]
+    )
+    try:
+        await asyncio.to_thread(_send_email_sync, f"[Test] {subject}", html)
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True, "sent_to": SMTP_TO}
+
+
 # ── Deploy runner ──────────────────────────────────────────────────────────
 
 
@@ -584,45 +699,55 @@ def _scheduled_project_ids() -> list[str]:
     return [p["id"] for p in projects]
 
 
-async def _scheduled_deploy_one(project: dict) -> None:
+async def _scheduled_deploy_one(project: dict) -> dict:
     pid, name = project["id"], project["name"]
 
     existing = _active.get(pid)
     if existing and not existing.done:
         _schedule_log(f"Skipping {name}: a deploy is already in progress")
-        return
+        return {"name": name, "status": "skipped", "container_restarted": None}
     if _is_dashboard(project) and _any_other_deploy_active(pid):
         _schedule_log(f"Skipping {name}: another deploy is in progress")
-        return
+        return {"name": name, "status": "skipped", "container_restarted": None}
     if not _is_dashboard(project) and _dashboard_deploy_active():
         _schedule_log(f"Skipping {name}: Deployment Helper is redeploying")
-        return
+        return {"name": name, "status": "skipped", "container_restarted": None}
 
     state = DeployState(str(uuid.uuid4())[:8])
     _active[pid] = state
     _schedule_log(f"Starting: {name}")
     await _run_deploy(pid, project, state)
     _schedule_log(f"Finished: {name} (success={state.success})")
+    return {
+        "name": name,
+        "status": "success" if state.success else "failed",
+        "container_restarted": state.container_restarted,
+    }
 
 
-async def _run_scheduled_deploys(project_ids: list[str]) -> None:
-    """Deploys the given projects one at a time, persisting progress so a
-    Deployment Helper restart mid-run can resume where it left off."""
+async def _run_scheduled_deploys(
+    project_ids: list[str], prior_results: list[dict] | None = None
+) -> None:
+    """Deploys the given projects one at a time, persisting progress (and
+    results so far) so a Deployment Helper restart mid-run can resume where
+    it left off and still include everything in the final email report."""
     remaining = list(project_ids)
+    results = list(prior_results or [])
     today = date.today().isoformat()
-    _save_schedule_run({"date": today, "remaining_ids": remaining})
+    _save_schedule_run({"date": today, "remaining_ids": remaining, "results": results})
     _schedule_log(f"=== Scheduled run started: {len(remaining)} project(s) ===")
 
     while remaining:
         pid = remaining[0]
         project = get_project_map().get(pid)
         if project:
-            await _scheduled_deploy_one(project)
+            results.append(await _scheduled_deploy_one(project))
         remaining.pop(0)
-        _save_schedule_run({"date": today, "remaining_ids": remaining})
+        _save_schedule_run({"date": today, "remaining_ids": remaining, "results": results})
 
     _clear_schedule_run()
     _schedule_log("=== Scheduled run complete ===")
+    await _send_schedule_report(results)
 
 
 async def _scheduler_loop() -> None:
@@ -650,12 +775,14 @@ async def _scheduler_loop() -> None:
 async def _on_startup() -> None:
     # Resume an interrupted scheduled run from earlier today — e.g. the
     # Deployment Helper's own scheduled deploy restarted this container
-    # mid-run, so pick back up with whatever projects were left.
+    # mid-run, so pick back up with whatever projects were left, carrying
+    # forward results already recorded so the final email report is complete.
     progress = _load_schedule_run()
     if progress and progress.get("date") == date.today().isoformat() and progress.get("remaining_ids"):
         remaining = progress["remaining_ids"]
+        prior_results = progress.get("results", [])
         _schedule_log(f"Resuming interrupted scheduled run: {len(remaining)} project(s) left")
-        asyncio.create_task(_run_scheduled_deploys(remaining))
+        asyncio.create_task(_run_scheduled_deploys(remaining, prior_results))
     else:
         _clear_schedule_run()
 
