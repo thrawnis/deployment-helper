@@ -8,6 +8,7 @@ A self-hosted web dashboard for managing and deploying Dockerized projects on a 
 - **One-click deploy** — runs the configured script and streams output live via Server-Sent Events
 - **Deploy history** — last 5 deploys per project stored persistently, with full log output
 - **Docker logs** — view the last 50 lines of `docker compose logs api` for any project inline
+- **Restart verification** — each deploy checks whether the project's `api` container ID/start-time actually changed, so a successful script exit that didn't actually restart anything is caught and surfaced (shown live and in history)
 - **Download logs** — save deploy output or Docker logs as a `.txt` file
 - **Safe self-redeploy** — redeploying the dashboard itself builds the new image first, then hands the container swap off to the Docker host so the process survives the container going down. The UI polls for the service coming back and reloads automatically
 - **Deploy guards** — only one deploy runs at a time per project; the Deployment Helper blocks all other deploys while it's redeploying, and vice versa

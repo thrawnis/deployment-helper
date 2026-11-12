@@ -185,6 +185,7 @@ class DeployState:
         self.done: bool = False
         self.success: bool | None = None
         self.finished_at: str | None = None
+        self.container_restarted: bool | None = None
 
 
 # project_id -> DeployState (kept for DEPLOY_STATE_TTL seconds after completion)
@@ -242,6 +243,38 @@ def get_git_info(path: str) -> dict:
         "last_commit": msg.strip(),
         "last_commit_time": ts.strip(),
     }
+
+
+def _get_container_state(path: str, service: str = "api") -> dict | None:
+    """Container id + start time for a project's `service`, or None if not found."""
+    try:
+        cid = subprocess.check_output(
+            ["docker", "compose", "ps", "-q", service],
+            cwd=path,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=10,
+        ).strip()
+        if not cid:
+            return None
+        started_at = subprocess.check_output(
+            ["docker", "inspect", "-f", "{{.State.StartedAt}}", cid],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=10,
+        ).strip()
+        return {"id": cid, "started_at": started_at}
+    except Exception:
+        return None
+
+
+def _container_restarted(before: dict | None, after: dict | None) -> bool | None:
+    """True/False if we can tell, None if no container was found either time."""
+    if before is None and after is None:
+        return None
+    if before is None or after is None:
+        return True
+    return before["id"] != after["id"] or before["started_at"] != after["started_at"]
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────
@@ -329,7 +362,7 @@ async def stream_deploy(project_id: str) -> StreamingResponse:
                 idx += 1
             if state.done:
                 yield (
-                    f"data: {json.dumps({'type': 'end', 'success': state.success})}\n\n"
+                    f"data: {json.dumps({'type': 'end', 'success': state.success, 'container_restarted': state.container_restarted})}\n\n"
                 )
                 break
             await asyncio.sleep(0.05)
@@ -489,6 +522,7 @@ async def admin_set_schedule(payload: dict) -> dict:
 
 
 async def _run_deploy(project_id: str, project: dict, state: DeployState) -> None:
+    before_container = _get_container_state(project["path"])
     try:
         proc = await asyncio.create_subprocess_shell(
             project["script"],
@@ -508,6 +542,9 @@ async def _run_deploy(project_id: str, project: dict, state: DeployState) -> Non
         state.logs.append({"type": "log", "text": f"ERROR: {exc}"})
         state.success = False
 
+    after_container = _get_container_state(project["path"])
+    state.container_restarted = _container_restarted(before_container, after_container)
+
     state.finished_at = datetime.now(timezone.utc).isoformat()
     state.done = True
 
@@ -519,6 +556,7 @@ async def _run_deploy(project_id: str, project: dict, state: DeployState) -> Non
             "started_at": state.started_at,
             "finished_at": state.finished_at,
             "success": state.success,
+            "container_restarted": state.container_restarted,
             "output": [e["text"] for e in state.logs if e.get("type") == "log"],
         },
     )
