@@ -87,7 +87,9 @@ Deploy history is stored in `./data/history.json` (a bind-mounted folder alongsi
 
 ## Daily Schedule
 
-From the admin panel (**⚙ Manage**), set a single run time (server's local time) under **Daily Schedule**, then check **Include in daily schedule** on each project you want deployed automatically. All other projects are left alone.
+From the admin panel (**⚙ Manage**), set a run time and timezone (an IANA name like `America/New_York`, or click **Use my browser's timezone**) under **Daily Schedule**, then check **Include in daily schedule** on each project you want deployed automatically. All other projects are left alone.
+
+The timezone matters because the container's system clock is typically UTC regardless of where you are — without an explicit timezone, "2am" would run at 2am UTC, not 2am local. Defaults to UTC if left unset.
 
 At the configured time, every day, the app deploys each opted-in project sequentially — Deployment Helper first if it's included, then the rest alphabetically. Progress is persisted to `./data/schedule_run.json`, so if deploying Deployment Helper restarts the container partway through, the remaining projects still run once it comes back up. Activity is logged to `./data/schedule.log`.
 

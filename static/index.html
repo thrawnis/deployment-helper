@@ -901,15 +901,34 @@ async function renderScheduleSection() {
   try {
     schedule = await api('GET', '/api/admin/schedule');
   } catch (err) {
-    schedule = { time: '03:00' };
+    schedule = { time: '03:00', timezone: 'UTC' };
   }
 
   const form = document.createElement('form');
   form.innerHTML = `
     <div class="form-group">
-      <label>Run time (server's local time)</label>
+      <label>Run time</label>
       <input type="time" name="time" value="${escapeHtml(schedule.time || '03:00')}" required />
+    </div>
+    <div class="form-group">
+      <label>Timezone (IANA name, e.g. America/New_York)</label>
+      <input name="timezone" value="${escapeHtml(schedule.timezone || 'UTC')}" placeholder="UTC" required />
     </div>`;
+
+  const tzInput = form.querySelector('[name="timezone"]');
+  const detectTzBtn = document.createElement('button');
+  detectTzBtn.type = 'button';
+  detectTzBtn.className = 'history-btn';
+  detectTzBtn.style.marginTop = '-0.4rem';
+  detectTzBtn.textContent = 'Use my browser\'s timezone';
+  detectTzBtn.onclick = () => {
+    try {
+      tzInput.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch (err) {
+      toast('Could not detect your browser timezone', true);
+    }
+  };
+  form.querySelector('.form-group:last-of-type').appendChild(detectTzBtn);
 
   const actions = document.createElement('div');
   actions.style.cssText = 'display:flex; justify-content:flex-end; gap:0.5rem;';
@@ -943,8 +962,8 @@ async function renderScheduleSection() {
     e.preventDefault();
     const fd = new FormData(form);
     try {
-      await apiBody('PUT', '/api/admin/schedule', { time: fd.get('time') });
-      toast('Schedule time saved');
+      await apiBody('PUT', '/api/admin/schedule', { time: fd.get('time'), timezone: fd.get('timezone') });
+      toast('Schedule saved');
     } catch (err) {
       toast(err.message, true);
     }

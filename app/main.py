@@ -13,6 +13,7 @@ from datetime import date, datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -35,6 +36,7 @@ MAX_HISTORY = 5
 DEPLOY_STATE_TTL = 120  # seconds to keep finished deploy state in memory
 DASHBOARD_NAME = "deployment helper"
 DEFAULT_SCHEDULE_TIME = "03:00"
+DEFAULT_SCHEDULE_TZ = "UTC"
 SCHEDULER_POLL_INTERVAL = 30  # seconds
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
@@ -142,11 +144,21 @@ def _parse_hhmm(value: str) -> tuple[int, int] | tuple[None, None]:
     return None, None
 
 
+def _parse_tz(name: str) -> ZoneInfo | None:
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, KeyError):
+        return None
+
+
 def _load_schedule() -> dict:
     try:
-        return json.loads(SCHEDULE_FILE.read_text())
+        data = json.loads(SCHEDULE_FILE.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"time": DEFAULT_SCHEDULE_TIME}
+        data = {}
+    data.setdefault("time", DEFAULT_SCHEDULE_TIME)
+    data.setdefault("timezone", DEFAULT_SCHEDULE_TZ)
+    return data
 
 
 def _save_schedule(data: dict) -> None:
@@ -613,7 +625,14 @@ async def admin_set_schedule(payload: dict) -> dict:
     hh, mm = _parse_hhmm(time_str)
     if hh is None:
         raise HTTPException(400, "time must be in HH:MM 24-hour format")
-    data = {"time": f"{hh:02d}:{mm:02d}"}
+
+    tz_name = str(payload.get("timezone", "")).strip() or DEFAULT_SCHEDULE_TZ
+    if _parse_tz(tz_name) is None:
+        raise HTTPException(
+            400, f'Unknown timezone "{tz_name}" — use an IANA name like America/New_York or UTC'
+        )
+
+    data = {"time": f"{hh:02d}:{mm:02d}", "timezone": tz_name}
     _save_schedule(data)
     return data
 
@@ -758,7 +777,8 @@ async def _scheduler_loop() -> None:
             hh, mm = _parse_hhmm(schedule.get("time", DEFAULT_SCHEDULE_TIME))
             if hh is None:
                 continue
-            now = datetime.now()
+            tz = _parse_tz(schedule.get("timezone", DEFAULT_SCHEDULE_TZ)) or ZoneInfo(DEFAULT_SCHEDULE_TZ)
+            now = datetime.now(tz)
             today_str = now.date().isoformat()
             if now.hour == hh and now.minute == mm and _load_last_trigger_date() != today_str:
                 _save_last_trigger_date(today_str)
