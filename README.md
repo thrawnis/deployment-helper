@@ -8,7 +8,7 @@ A self-hosted web dashboard for managing and deploying Dockerized projects on a 
 - **One-click deploy** — runs the configured script and streams output live via Server-Sent Events
 - **Deploy history** — last 5 deploys per project stored persistently, with full log output
 - **Docker logs** — view the last 50 lines of `docker compose logs api` for any project inline
-- **Restart verification** — each deploy checks whether the project's `api` container ID/start-time actually changed, so a successful script exit that didn't actually restart anything is caught and surfaced (shown live and in history)
+- **Update detection** — each deploy reports whether it actually updated the app. A project's own deploy script can say so explicitly by printing a `##DEPLOY_STATUS:UPDATED##` or `##DEPLOY_STATUS:NO_CHANGE##` marker line (see **Update Detection** below); if it doesn't, the dashboard falls back to checking whether the project's `api` container ID/start-time actually changed. Shown live and in history.
 - **Download logs** — save deploy output or Docker logs as a `.txt` file
 - **Safe self-redeploy** — redeploying the dashboard itself builds the new image first, then hands the container swap off to the Docker host so the process survives the container going down. The UI polls for the service coming back and reloads automatically
 - **Deploy guards** — only one deploy runs at a time per project; the Deployment Helper blocks all other deploys while it's redeploying, and vice versa
@@ -97,7 +97,25 @@ This runs entirely inside the app — no host cron job is needed.
 
 ### Email report
 
-If `SMTP_HOST`, `SMTP_FROM`, and `SMTP_TO` are set in `.env`, a summary email is sent once the nightly run finishes — a simple HTML table with each app's name, whether it deployed successfully, and whether a container restart was actually detected (see **Restart verification** above). Skipped projects (e.g. blocked by a concurrent deploy) are included too. Use **Send test email** in the **Daily Schedule** section of the admin panel to verify your SMTP settings without waiting for the scheduled run.
+If `SMTP_HOST`, `SMTP_FROM`, and `SMTP_TO` are set in `.env`, a summary email is sent once the nightly run finishes — a simple HTML table with each app's name, whether it deployed successfully, and whether an update was actually detected (see **Update Detection** below). Skipped projects (e.g. blocked by a concurrent deploy) are included too. Use **Send test email** in the **Daily Schedule** section of the admin panel to verify your SMTP settings without waiting for the scheduled run.
+
+## Update Detection
+
+For each deploy, the dashboard tries to determine whether anything actually changed — not just whether the script exited successfully.
+
+**Preferred: have the deploy script say so explicitly.** Print exactly one of these lines to stdout as soon as the script knows which case applies (typically right after comparing git commits, before building/restarting):
+
+```
+##DEPLOY_STATUS:UPDATED##
+##DEPLOY_STATUS:NO_CHANGE##
+```
+
+This is independent of the exit code — a script can print `NO_CHANGE` and still exit 0 (nothing to do is not a failure), or print `UPDATED` and later fail during the build (the dashboard still reports a failure from the exit code, but knows an update was attempted). If the script prints the marker more than once, the last one wins.
+
+**Fallback: automatic container check.** If a script never prints the marker, the dashboard checks whether the project's `api` service container (via `docker compose ps` + `docker inspect`) actually got a new container ID or start time before vs. after the deploy. This works out of the box with no changes to existing scripts, but only if the service is literally named `api` and the project uses Docker Compose.
+
+If neither signal is available, "Updated" shows as unknown rather than guessing.
+
 
 ## Security
 

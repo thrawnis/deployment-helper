@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import secrets
 import smtplib
 import subprocess
@@ -212,7 +213,7 @@ def _build_report_email(results: list[dict]) -> tuple[str, str]:
     row_html = []
     for r in results:
         status = status_labels.get(r.get("status"), r.get("status", "unknown"))
-        restarted = r.get("container_restarted")
+        restarted = r.get("updated")
         updated = "Yes" if restarted is True else "No" if restarted is False else "Unknown"
         row_html.append(
             "<tr>"
@@ -297,7 +298,7 @@ class DeployState:
         self.done: bool = False
         self.success: bool | None = None
         self.finished_at: str | None = None
-        self.container_restarted: bool | None = None
+        self.updated: bool | None = None
 
 
 # project_id -> DeployState (kept for DEPLOY_STATE_TTL seconds after completion)
@@ -389,6 +390,26 @@ def _container_restarted(before: dict | None, after: dict | None) -> bool | None
     return before["id"] != after["id"] or before["started_at"] != after["started_at"]
 
 
+_DEPLOY_STATUS_RE = re.compile(r"^##DEPLOY_STATUS:(UPDATED|NO_CHANGE)##$")
+
+
+def _parse_deploy_status_marker(logs: list[dict]) -> bool | None:
+    """Looks for a '##DEPLOY_STATUS:UPDATED##' / '##DEPLOY_STATUS:NO_CHANGE##'
+    line printed by the project's own deploy script. This is the preferred,
+    explicit signal for whether new code was actually deployed — falls back
+    to the docker-based heuristic (_container_restarted) when a script
+    doesn't print one. If a script prints the marker more than once, the
+    last occurrence wins."""
+    result = None
+    for entry in logs:
+        if entry.get("type") != "log":
+            continue
+        m = _DEPLOY_STATUS_RE.match(entry["text"].strip())
+        if m:
+            result = m.group(1) == "UPDATED"
+    return result
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────
 
 
@@ -474,7 +495,7 @@ async def stream_deploy(project_id: str) -> StreamingResponse:
                 idx += 1
             if state.done:
                 yield (
-                    f"data: {json.dumps({'type': 'end', 'success': state.success, 'container_restarted': state.container_restarted})}\n\n"
+                    f"data: {json.dumps({'type': 'end', 'success': state.success, 'updated': state.updated})}\n\n"
                 )
                 break
             await asyncio.sleep(0.05)
@@ -641,8 +662,8 @@ async def admin_set_schedule(payload: dict) -> dict:
 async def admin_test_email() -> dict:
     subject, html = _build_report_email(
         [
-            {"name": "Example App", "status": "success", "container_restarted": True},
-            {"name": "Other App", "status": "failed", "container_restarted": False},
+            {"name": "Example App", "status": "success", "updated": True},
+            {"name": "Other App", "status": "failed", "updated": False},
         ]
     )
     try:
@@ -677,7 +698,11 @@ async def _run_deploy(project_id: str, project: dict, state: DeployState) -> Non
         state.success = False
 
     after_container = _get_container_state(project["path"])
-    state.container_restarted = _container_restarted(before_container, after_container)
+    marker_status = _parse_deploy_status_marker(state.logs)
+    if marker_status is not None:
+        state.updated = marker_status
+    else:
+        state.updated = _container_restarted(before_container, after_container)
 
     state.finished_at = datetime.now(timezone.utc).isoformat()
     state.done = True
@@ -690,7 +715,7 @@ async def _run_deploy(project_id: str, project: dict, state: DeployState) -> Non
             "started_at": state.started_at,
             "finished_at": state.finished_at,
             "success": state.success,
-            "container_restarted": state.container_restarted,
+            "updated": state.updated,
             "output": [e["text"] for e in state.logs if e.get("type") == "log"],
         },
     )
@@ -724,13 +749,13 @@ async def _scheduled_deploy_one(project: dict) -> dict:
     existing = _active.get(pid)
     if existing and not existing.done:
         _schedule_log(f"Skipping {name}: a deploy is already in progress")
-        return {"name": name, "status": "skipped", "container_restarted": None}
+        return {"name": name, "status": "skipped", "updated": None}
     if _is_dashboard(project) and _any_other_deploy_active(pid):
         _schedule_log(f"Skipping {name}: another deploy is in progress")
-        return {"name": name, "status": "skipped", "container_restarted": None}
+        return {"name": name, "status": "skipped", "updated": None}
     if not _is_dashboard(project) and _dashboard_deploy_active():
         _schedule_log(f"Skipping {name}: Deployment Helper is redeploying")
-        return {"name": name, "status": "skipped", "container_restarted": None}
+        return {"name": name, "status": "skipped", "updated": None}
 
     state = DeployState(str(uuid.uuid4())[:8])
     _active[pid] = state
@@ -740,7 +765,7 @@ async def _scheduled_deploy_one(project: dict) -> dict:
     return {
         "name": name,
         "status": "success" if state.success else "failed",
-        "container_restarted": state.container_restarted,
+        "updated": state.updated,
     }
 
 

@@ -590,14 +590,14 @@ function connectStream(projectId, card, btn, logOut, logTitle, projectName = '')
       es.close(); delete streams[projectId];
 
       const ok = data.success;
-      const restarted = data.container_restarted; // true | false | null
+      const updated = data.updated; // true | false | null
       logTitle.textContent = ok ? '✓ Deploy succeeded' : '✗ Deploy failed';
 
       const note = document.createElement('div');
       note.className = 'log-line log-head';
-      if (restarted === true) note.textContent = '✓ Container restarted';
-      else if (restarted === false) note.textContent = '⚠ Container did NOT restart';
-      else note.textContent = 'ℹ Container restart status unknown (no "api" service found)';
+      if (updated === true) note.textContent = '✓ Update detected';
+      else if (updated === false) note.textContent = 'ℹ No update detected';
+      else note.textContent = 'ℹ Update status unknown (no ##DEPLOY_STATUS## marker or "api" service found)';
       logOut.appendChild(note);
       logOut.scrollTop = logOut.scrollHeight;
 
@@ -623,7 +623,6 @@ function connectStream(projectId, card, btn, logOut, logTitle, projectName = '')
       }
 
       if (!ok) toast(`Deploy failed for project ${projectId}`, true);
-      else if (restarted === false) toast(`Deploy succeeded but the container did not appear to restart`, true);
     }
   };
 
@@ -701,11 +700,11 @@ async function showHistory(projectId, logPanel, logOut, logTitle) {
       const icon = deploy.success === true ? '✓' : deploy.success === false ? '✗' : '⟳';
       const head = document.createElement('div');
       head.className = 'log-line log-head';
-      let restartNote;
-      if (deploy.container_restarted === true) restartNote = '· container restarted';
-      else if (deploy.container_restarted === false) restartNote = '· ⚠ container NOT restarted';
-      else restartNote = '';
-      head.textContent = `${icon} ${deploy.id}  ${ago(deploy.started_at)} ${restartNote}`;
+      let updateNote;
+      if (deploy.updated === true) updateNote = '· updated';
+      else if (deploy.updated === false) updateNote = '· no update';
+      else updateNote = '';
+      head.textContent = `${icon} ${deploy.id}  ${ago(deploy.started_at)} ${updateNote}`;
       logOut.appendChild(head);
       (deploy.output || []).slice(-30).forEach(line => {
         const d = document.createElement('div');
