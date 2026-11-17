@@ -7,7 +7,7 @@ A self-hosted web dashboard for managing and deploying Dockerized projects on a 
 - **Project cards** — one card per project showing current git branch, last commit, last deploy time, and run time
 - **One-click deploy** — runs the configured script and streams output live via Server-Sent Events
 - **Deploy history** — last 5 deploys per project stored persistently, with full log output
-- **Docker logs** — view the last 50 lines of `docker compose logs api` for any project inline
+- **Docker logs** — view the last 100 lines of `docker compose logs` (all services) run in each project's folder, inline
 - **Update detection** — each deploy reports whether it actually updated the app. A project's own deploy script can say so explicitly by printing a `##DEPLOY_STATUS:UPDATED##` or `##DEPLOY_STATUS:NO_CHANGE##` marker line (see **Update Detection** below); if it doesn't, the dashboard falls back to checking whether the project's `api` container ID/start-time actually changed. Shown live and in history.
 - **Download logs** — save deploy output or Docker logs as a `.txt` file
 - **Safe self-redeploy** — redeploying the dashboard itself builds the new image first, then hands the container swap off to the Docker host so the process survives the container going down. The UI polls for the service coming back and reloads automatically

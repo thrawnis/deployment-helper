@@ -522,7 +522,7 @@ async def docker_logs(project_id: str) -> dict:
         raise HTTPException(404, "Project not found")
     try:
         result = subprocess.run(
-            ["docker", "compose", "logs", "api", "--tail=50", "--no-color"],
+            ["docker", "compose", "logs", "--tail=100", "--no-color"],
             cwd=project["path"],
             capture_output=True,
             text=True,

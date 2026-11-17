@@ -486,7 +486,7 @@ function buildCard(p) {
 
   const dockerLogsBtn = document.createElement('button');
   dockerLogsBtn.className = 'history-btn';
-  dockerLogsBtn.title = 'docker compose logs api --tail=50';
+  dockerLogsBtn.title = 'docker compose logs --tail=100';
   dockerLogsBtn.innerHTML = IC.logs + ' Docker logs';
   dockerLogsBtn.onclick = () => showDockerLogs(id, name, logPanel, logOut, logTitle);
 
@@ -678,7 +678,7 @@ async function showDockerLogs(projectId, projectName, logPanel, logOut, logTitle
       logOut.appendChild(d);
     });
     logOut.scrollTop = logOut.scrollHeight;
-    logTitle.textContent = 'docker compose logs api --tail=50';
+    logTitle.textContent = 'docker compose logs --tail=100';
 
     // wire download button to this content
     const dlBtn = logPanel.querySelector('.log-download');
