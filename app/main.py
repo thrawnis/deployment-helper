@@ -459,7 +459,7 @@ async def list_projects() -> list[dict]:
 
 
 @app.post("/api/projects/{project_id}/deploy")
-async def start_deploy(project_id: str) -> dict:
+async def start_deploy(project_id: str, payload: dict | None = None) -> dict:
     project = get_project_map().get(project_id)
     if not project:
         raise HTTPException(404, "Project not found")
@@ -474,10 +474,11 @@ async def start_deploy(project_id: str) -> dict:
     if not _is_dashboard(project) and _dashboard_deploy_active():
         raise HTTPException(409, "Cannot deploy while Deployment Helper is redeploying")
 
+    force = bool((payload or {}).get("force", False))
     state = DeployState(str(uuid.uuid4())[:8])
     _active[project_id] = state
-    asyncio.create_task(_run_deploy(project_id, project, state))
-    return {"deploy_id": state.id}
+    asyncio.create_task(_run_deploy(project_id, project, state, force=force))
+    return {"deploy_id": state.id, "force": force}
 
 
 @app.get("/api/projects/{project_id}/stream")
@@ -676,11 +677,14 @@ async def admin_test_email() -> dict:
 # ── Deploy runner ──────────────────────────────────────────────────────────
 
 
-async def _run_deploy(project_id: str, project: dict, state: DeployState) -> None:
+async def _run_deploy(
+    project_id: str, project: dict, state: DeployState, force: bool = False
+) -> None:
     before_container = _get_container_state(project["path"])
+    script = project["script"] + " --force" if force else project["script"]
     try:
         proc = await asyncio.create_subprocess_shell(
-            project["script"],
+            script,
             cwd=project["path"],
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
@@ -716,6 +720,7 @@ async def _run_deploy(project_id: str, project: dict, state: DeployState) -> Non
             "finished_at": state.finished_at,
             "success": state.success,
             "updated": state.updated,
+            "forced": force,
             "output": [e["text"] for e in state.logs if e.get("type") == "log"],
         },
     )

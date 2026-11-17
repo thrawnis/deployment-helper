@@ -514,18 +514,36 @@ function buildCard(p) {
   const top = document.createElement('div'); top.className = 'card-top';
   top.append(titleRow, meta);
 
+  // force-rebuild checkbox — auto-unchecks after triggering one deploy
+  const forceRow = document.createElement('label');
+  forceRow.className = 'meta-row';
+  forceRow.style.cssText = 'cursor:pointer; user-select:none;';
+  const forceCheckbox = document.createElement('input');
+  forceCheckbox.type = 'checkbox';
+  forceCheckbox.style.cssText = 'width:auto; margin:0;';
+  const forceLabel = document.createElement('span');
+  forceLabel.className = 'meta-text';
+  forceLabel.textContent = 'Force rebuild (passes --force to the deploy script)';
+  forceRow.append(forceCheckbox, forceLabel);
+
+  const forceWrap = document.createElement('div');
+  forceWrap.style.cssText = 'padding:0 1.125rem 0.75rem;';
+  forceWrap.appendChild(forceRow);
+
   const footer = document.createElement('div'); footer.className = 'card-footer';
   const footerLeft = document.createElement('div');
   footerLeft.style.cssText = 'display:flex;gap:0.75rem;align-items:center;';
   footerLeft.append(histBtn, dockerLogsBtn);
   footer.append(footerLeft, btn);
 
-  card.append(top, footer, logPanel);
+  card.append(top, forceWrap, footer, logPanel);
 
   // deploy action
   btn.onclick = async () => {
+    const force = forceCheckbox.checked;
     try {
-      await api('POST', `/api/projects/${id}/deploy`);
+      await apiBody('POST', `/api/projects/${id}/deploy`, { force });
+      forceCheckbox.checked = false;
       logOut.innerHTML = '';
       logPanel.classList.add('open');
       logTitle.textContent = 'Connecting…';
@@ -704,7 +722,8 @@ async function showHistory(projectId, logPanel, logOut, logTitle) {
       if (deploy.updated === true) updateNote = '· updated';
       else if (deploy.updated === false) updateNote = '· no update';
       else updateNote = '';
-      head.textContent = `${icon} ${deploy.id}  ${ago(deploy.started_at)} ${updateNote}`;
+      const forcedNote = deploy.forced ? '· forced' : '';
+      head.textContent = `${icon} ${deploy.id}  ${ago(deploy.started_at)} ${updateNote} ${forcedNote}`;
       logOut.appendChild(head);
       (deploy.output || []).slice(-30).forEach(line => {
         const d = document.createElement('div');
